@@ -109,9 +109,16 @@ def enum_keys():
     keys = []
     for path in KEY_DERIVING_ENUMS:
         source = open(path).read()
-        prefix = re.search(r'return\s+"([^"]+)"\s*\+\s*name\(\)\.toLowerCase\(\)', source)
+        prefix = re.search(r'return\s+"([^"]+)"\s*\+\s*name\(\)\.toLowerCase\(([^)]*)\)', source)
         if not prefix:
             raise SystemExit('%s no longer derives its key from name(); update this check' % path)
+        # A bare toLowerCase() uses the default locale, and under a Turkish one "IDLE" lowercases to
+        # "\u0131dle" with a dotless i -- a key nobody has translated, on the goggles and on a Display
+        # Board, with nothing logged. Python's .lower() below is locale-independent, so this check
+        # cannot see the difference by comparing keys; it has to read the call.
+        if prefix.group(2).strip() != 'Locale.ROOT':
+            raise SystemExit('%s: name().toLowerCase(%s) is locale-dependent; pass Locale.ROOT'
+                             % (path, prefix.group(2).strip()))
         # Constants are the bare SCREAMING_CASE identifiers before the enum's first method.
         body = source[source.index('{') + 1:]
         body = body[:body.index('(')] if '(' in body else body
@@ -131,6 +138,27 @@ def display_source_keys():
         raise SystemExit('%s: found no registered display sources; update this check'
                          % DISPLAY_SOURCES)
     return [(DISPLAY_SOURCES, '%s.display_source.%s' % (NAMESPACE, name)) for name in ids]
+
+
+def translated_option_keys():
+    """
+    `<namespace>.<prefix>.<option>` for every GBLang.translatedOptions call.
+
+    These are the labels on a scroll input in the Display Link's UI, built by concatenation rather
+    than passed to translate(), so the call-site scan above cannot see them.
+    """
+    keys = []
+    for path in java_sources():
+        source = open(path).read()
+        for match in re.finditer(r'GBLang\.translatedOptions\(\s*("(?:[^"\\]|\\.)*"(?:\s*,\s*"(?:[^"\\]|\\.)*")*)\s*\)',
+                                 source, re.S):
+            parts = re.findall(r'"((?:[^"\\]|\\.)*)"', match.group(1))
+            prefix, options = parts[0], parts[1:]
+            if not options:
+                raise SystemExit('%s: translatedOptions with no options' % path)
+            for option in options:
+                keys.append((path, '%s.%s.%s' % (NAMESPACE, prefix, option)))
+    return keys
 
 
 def main():
@@ -157,6 +185,12 @@ def main():
         checked += 1
         if NAMESPACE + '.' + key not in lang:
             problems.append('%s: %s.%s is not in en_us.json' % (path, NAMESPACE, key))
+
+    for path, key in translated_option_keys():
+        checked += 1
+        if key not in lang:
+            problems.append('%s: %s is not in en_us.json, so a scroll input shows the raw key'
+                            % (path, key))
 
     for path, key in display_source_keys():
         checked += 1

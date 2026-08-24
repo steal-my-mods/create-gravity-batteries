@@ -16,7 +16,8 @@ winding up on the network's surplus and letting down to drive the shaft when the
 python3 tools/generate_textures.py     # redraw every texture and the badge
 python3 tools/generate_structures.py   # the Ponder + GameTest structures and the scene's lang keys
 python3 tools/check_lang.py            # every translation key this mod asks for actually exists
-python3 tools/generate_logo.py         # the mod badge, and --size 512 for branding/
+python3 tools/generate_logo.py         # the in-jar badge at 256
+python3 tools/generate_logo.py branding/icon-512.png --size 512   # ...and the 512 CurseForge wants
 ```
 
 JDK 21 required. `gradle/gradle-daemon-jvm.properties` pins the daemon to it, so the commands work
@@ -363,8 +364,10 @@ Releases go out through `publishMods` (`me.modmuss50.mod-publish-plugin`), drive
   accepted the release, leaving a version published on one site and not the other. Five seconds of
   curl against the upload API's cheapest authenticated GET turns that into a failure before anything
   has shipped anywhere. The status codes were measured against the real API rather than assumed: 200
-  valid, **400 malformed**, 401 absent. All three fail the release as a bad token; anything else fails
-  it as "could not reach CurseForge", because a 502 is not a bad secret.
+  valid, **400 malformed**, 401 absent. 401/403 blame the token outright; 400 fails the release too but
+  names both possibilities, because a changed API contract or a typo in the URL gets a 400 just as
+  readily as a malformed secret does. Anything else fails as "could not reach CurseForge", because a
+  502 is not a bad secret.
 - **Running the release workflow by hand rehearses by default.** `workflow_dispatch` has a `dry_run`
   input defaulting to true, so a manual trigger runs the whole path — token check, build, GameTests,
   generator diff, changelog lookup — and writes what it *would* have uploaded instead of uploading it.
@@ -394,6 +397,41 @@ Releases go out through `publishMods` (`me.modmuss50.mod-publish-plugin`), drive
   only that a *misleading* AI-modified showcase image carry a disclaimer, which a badge of the actual
   block is not. To restore Modrinth: redraw the art by hand, add a `modrinth_project_id`, re-add the
   `modrinth` block to `publishMods` **and** `MODRINTH_TOKEN` to `release.yml`.
+
+## Things a review caught that reading the code did not
+
+- **The flood fill in `generate_logo.py` currently suppresses nothing.** Measured on the sprite as
+  drawn: 186 transparent cells, all 186 reachable from the border, zero enclosed holes. What keeps
+  graph paper visible between the gantry's legs is that the gaps are wider than twice `STROKE`, not
+  `outside_cells`. It stays because the first closed opening anyone draws — a window, a ring, a holed
+  counterweight — needs it, and discovering that from a rendered badge is slow. But do not trust it to
+  be doing anything today.
+- **`disassemble()` used to leave `offset` set, and `findWeightOffset` trusted it.** A battery that had
+  once held a weight 20 blocks down would let *rotation alone* take whatever later stood at 20 — the
+  hole straight through the flush-only rule that exists to stop exactly that.
+  `rotationDoesNotReachForAWeightItOnceHeld` is the lock, and `disassemble()` now zeroes the offset.
+- **`collided()` clamped the measured drop on collisions in either direction.** A weight that ran into
+  something on the way *up* had its capacity collapsed to nothing: no charge, nothing to spend, idle
+  reason DISCHARGED, with a full weight hanging over a clear shaft.
+  `hittingSomethingWhileWindingUpKeepsTheDrop` is the lock.
+- **Catnip's `LangNumberFormat` keeps three decimal places on a dedicated server.** Its `update()`,
+  which sets two, is a client hook. So `CreateLang.number(x)` in anything that runs server-side and
+  ships a literal component — a Display Link source, for instance — renders "66.667%". Create's own
+  numeric sources go through `PercentOrProgressBarDisplaySource`/`NumericSingleLineDisplaySource`
+  instead, which format integers and bring the Flap Display layouts with them. Use those.
+- **`SimpleRegistry.Multi#add` does not invalidate the per-key cache that `get` fills; `addProvider`
+  does.** Create's blocks attach their display sources during block registration, before anything can
+  ask, so they never meet this. Attaching at common setup does, and one early query would cache "no
+  sources" for the rest of the run — silently, with the GameTest still green, because in a test the
+  first query happens long after setup. `GBDisplaySources` registers providers for that reason, and
+  they resolve the block lazily so registry ordering stops mattering too.
+- **`name().toLowerCase()` is locale-dependent.** Under a Turkish locale `"IDLE"` lowercases to "ıdle",
+  and every mode and idle-reason key would render as itself on the goggles and on a Display Board.
+  Both enums pass `Locale.ROOT`, and `check_lang.py` fails a bare `toLowerCase()` so it cannot come
+  back — it cannot catch it by comparing keys, because Python's `.lower()` is locale-independent.
+- **The comparator and the Threshold Switch share `chargeOnScale`.** They worked the charge out
+  separately — one rounding, one ceiling — and disagreed at the ends: a battery at 0.3% gave a
+  comparator a strength of 1 while telling a Threshold Switch it was at 0.
 
 ## Known gaps
 

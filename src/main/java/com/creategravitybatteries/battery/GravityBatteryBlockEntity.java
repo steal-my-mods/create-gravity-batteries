@@ -493,33 +493,31 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 	/**
 	 * Where the weight is, if there is one.
 	 *
-	 * <p>Three rules, in order, and the third one is only offered to a player.
+	 * <p>Two rules, and the second is only offered to a player: flush against the battery, which is
+	 * where a Rope Pulley picks its load up from; or anywhere down the shaft, <em>only</em> when a
+	 * player has right-clicked the block.
 	 *
-	 * <ol>
-	 * <li>The offset this battery was last holding a weight at, so one that was deliberately released
-	 * can be handed the same weight back without rebuilding it.
-	 * <li>Flush against the battery, which is where a Rope Pulley picks its load up from.
-	 * <li>Anywhere down the shaft — <em>only</em> when a player has right-clicked the block.
-	 * </ol>
+	 * <p>That restriction is not fussiness. Rotation reaching a battery is not a request: an unattended
+	 * battery that got power would walk up to {@link GBConfig#maxCableLength} blocks down, find the
+	 * first solid thing, and tear it out of the world — someone's floor, or the terrain — and then
+	 * never let go, because that is what a battery does. A player right-clicking is looking at the
+	 * block, has asked for it, and can undo it with a second click; rotation arriving on a shaft is
+	 * none of those things.
 	 *
-	 * <p>That last restriction is not fussiness. Rotation reaching a battery is not a request: an
-	 * unattended battery that got power would walk up to {@link GBConfig#maxCableLength} blocks down,
-	 * find the first solid thing, and tear it out of the world — someone's floor, or the terrain — and
-	 * then never let go of it, because that is what a battery does. A player right-clicking the block is
-	 * looking at it, has asked for it, and can undo it with a second click; rotation arriving on a shaft
-	 * is none of those things.
+	 * <p>There used to be a third rule ahead of both: the offset this battery last held a weight at, so
+	 * a released weight could be picked back up without rebuilding it. It was a hole straight through
+	 * the restriction — {@link #disassemble()} left the offset in place and it persists, so a battery
+	 * that had once held something 20 blocks down would let rotation alone take whatever later stood at
+	 * 20. The player path's scan finds a released weight at the same offset anyway, so the rule bought
+	 * nothing that is not still there.
 	 */
 	private int findWeightOffset(boolean mayReach) {
-		int range = getExtensionRange();
-
-		int remembered = Mth.floor(offset);
-		if (remembered > 0 && remembered <= range && isWeightAt(remembered))
-			return remembered;
 		if (isWeightAt(0))
 			return 0;
 		if (!mayReach)
 			return -1;
 
+		int range = getExtensionRange();
 		for (int candidate = 1; candidate <= range; candidate++)
 			if (isWeightAt(candidate))
 				return candidate;
@@ -584,6 +582,9 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 		running = false;
 		weightBlocks = 0;
 		restingOffset = 0;
+		// Nothing on the end of the cable means no offset either. Leaving it set was what let rotation
+		// alone reach for a block at the offset a weight used to hang at -- see findWeightOffset.
+		offset = 0;
 		mode = BatteryMode.IDLE;
 		idleReason = IdleReason.NO_WEIGHT;
 		// Not through setMode: on the removal path the network is already being torn down by
@@ -621,18 +622,25 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 	}
 
 	/**
-	 * The weight has found the floor. Recording where is what stops a blocked battery generating for
-	 * nothing: capacity is only ever supplied while the weight is actually descending, and
+	 * The weight has run into something. Recording where is what stops a blocked battery generating for
+	 * nothing: capacity is only ever supplied while the weight can actually descend, and
 	 * {@link #canDescend()} is what enforces that.
+	 *
+	 * <p>Only a collision on the way <em>down</em> tells us anything about the drop. Hitting something
+	 * while winding up says only that the way up is blocked, and clamping the drop to that would leave
+	 * the battery reading empty — no charge, nothing to spend, {@link IdleReason#DISCHARGED} — with a
+	 * full weight hanging over a clear shaft.
 	 */
 	@Override
 	protected void collided() {
+		boolean descending = mode == BatteryMode.DISCHARGING;
 		super.collided();
 		if (level == null || level.isClientSide)
 			return;
-		restingOffset = Math.min(restingOffset, offset);
-		if (mode == BatteryMode.DISCHARGING)
+		if (descending) {
+			restingOffset = Math.min(restingOffset, offset);
 			setMode(BatteryMode.IDLE);
+		}
 		sendData();
 	}
 
@@ -970,9 +978,28 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 
 	/** Comparator output: 0 empty, 15 fully wound. */
 	public int getComparatorOutput() {
+		return chargeOnScale(15);
+	}
+
+	/**
+	 * The charge on a 0..{@code max} scale, with both ends meaning exactly what they say: 0 only when
+	 * the weight is resting and {@code max} only when it is as high as it goes. In between it rounds up,
+	 * so a battery with anything left in it never reads empty.
+	 *
+	 * <p>One method because the comparator and the Threshold Switch both need it and used to work it out
+	 * separately — one rounding, one ceiling. That left them disagreeing at the ends: a battery at 0.3%
+	 * gave a comparator a strength of 1 while telling a Threshold Switch it was at 0, so "fire when it
+	 * hits empty" fired while a comparator still said there was charge in it.
+	 */
+	private int chargeOnScale(int max) {
 		if (weightBlocks <= 0)
 			return 0;
-		return Mth.clamp(Mth.ceil(getChargeFraction() * 15), 0, 15);
+		float fraction = getChargeFraction();
+		if (fraction <= 0)
+			return 0;
+		if (fraction >= 1)
+			return max;
+		return Mth.clamp(Mth.ceil(fraction * max), 1, max - 1);
 	}
 
 	// --- Threshold Switch -------------------------------------------------------------------------
@@ -988,7 +1015,7 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 	 */
 	@Override
 	public int getCurrentValue() {
-		return Math.round(getChargeFraction() * 100);
+		return chargeOnScale(100);
 	}
 
 	@Override

@@ -19,6 +19,7 @@ import com.simibubi.create.AllBlocks;
 import com.simibubi.create.api.behaviour.display.DisplaySource;
 import com.simibubi.create.content.kinetics.base.HorizontalAxisKineticBlock;
 import com.simibubi.create.content.redstone.displayLink.DisplayLinkContext;
+import com.simibubi.create.content.redstone.displayLink.target.DisplayTargetStats;
 import com.simibubi.create.content.redstone.thresholdSwitch.ThresholdSwitchObservable;
 
 import net.minecraft.core.BlockPos;
@@ -493,6 +494,76 @@ public class GBGameTests {
 		return comparator.getOutputSignal();
 	}
 
+	/**
+	 * A battery that once held a weight must not let rotation alone reach for that offset again.
+	 *
+	 * <p>The first version of the flush-only rule had a hole straight through it: an offset it
+	 * remembered outranked both other rules, {@code disassemble()} left the offset in place, and
+	 * {@code LinearActuatorBlockEntity} persists it — so a battery that had held something 20 blocks
+	 * down would take whatever later stood at 20, with no player involved. Exactly the bug the flush
+	 * rule was added to close.
+	 */
+	@GameTest(template = "test_rig", timeoutTicks = 300)
+	public static void rotationDoesNotReachForAWeightItOnceHeld(GameTestHelper helper) {
+		rig(helper);
+		hangWeight(helper, 3, HIGH_TOP);
+		activate(helper, BATTERY_A); // reaches down and takes it, offset 2
+
+		// Let go again, and take the weight away entirely.
+		helper.runAfterDelay(SETTLE_TICKS, () -> {
+			activate(helper, BATTERY_A);
+		});
+		helper.runAfterDelay(SETTLE_TICKS + 10, () -> {
+			for (int dz = 0; dz <= 1; dz++)
+				for (int dy = 0; dy <= 1; dy++)
+					helper.setBlock(new BlockPos(3, HIGH_TOP - dy, 5 + dz), Blocks.AIR);
+			// Something innocent now stands where the weight used to hang.
+			helper.setBlock(new BlockPos(3, HIGH_TOP, 5), Blocks.CHEST);
+			drive(helper);
+		});
+
+		helper.runAfterDelay(SETTLE_TICKS + 60, () -> {
+			GravityBatteryBlockEntity battery = battery(helper, BATTERY_A);
+			helper.assertTrue(!battery.running,
+				"rotation reached back to the offset it used to hold a weight at");
+			helper.assertBlockPresent(Blocks.CHEST, new BlockPos(3, HIGH_TOP, 5));
+			helper.succeed();
+		});
+	}
+
+	/**
+	 * Hitting something on the way up must not cost the battery its capacity.
+	 *
+	 * <p>{@code collided()} clamped the measured drop on any collision, and a collision while winding up
+	 * says only that the way up is blocked. It left a battery reading empty — nothing to spend, idle
+	 * reason DISCHARGED — with a full weight hanging over a clear shaft.
+	 */
+	@GameTest(template = "test_rig", timeoutTicks = 400)
+	public static void hittingSomethingWhileWindingUpKeepsTheDrop(GameTestHelper helper) {
+		rig(helper);
+		hangWeight(helper, 3, HIGH_TOP);
+		activate(helper, BATTERY_A);
+		drive(helper);
+
+		float[] drop = new float[1];
+		// A ceiling one block above the weight, so winding up runs straight into it.
+		helper.runAfterDelay(SETTLE_TICKS, () -> {
+			drop[0] = battery(helper, BATTERY_A).getDropRange();
+			helper.assertTrue(drop[0] > 1, "the rig should have measured a real drop, it read " + drop[0]);
+			helper.setBlock(new BlockPos(3, HIGH_TOP + 1, 5), Blocks.OBSIDIAN);
+		});
+
+		helper.runAfterDelay(320, () -> {
+			GravityBatteryBlockEntity battery = battery(helper, BATTERY_A);
+			helper.assertTrue(battery.getDropRange() == drop[0],
+				"the drop was clamped by an upward collision: " + drop[0] + " -> "
+					+ battery.getDropRange());
+			helper.assertTrue(battery.getIdleReason() != IdleReason.DISCHARGED,
+				"a battery with a full weight over a clear shaft says it is spent");
+			helper.succeed();
+		});
+	}
+
 	// --- Threshold Switch and Display Link ---------------------------------------------------------
 
 	/**
@@ -589,20 +660,34 @@ public class GBGameTests {
 					.equals(NAMESPACE + ".tooltip.gravity_battery.mode.charging"),
 				"the status source said " + keyOf(GBDisplaySources.BATTERY_STATUS.get(), battery));
 
-			// The charge source is a number and a literal "%", so it has no key of its own -- assert it
-			// renders something with a digit in it rather than an empty line.
-			String charge = lineOf(GBDisplaySources.BATTERY_CHARGE.get(), battery).getString();
-			helper.assertTrue(charge.endsWith("%") && charge.chars()
-				.anyMatch(Character::isDigit), "the charge source rendered '" + charge + "'");
+			// Mode 0 is the bar, which is the default, and it should be made of Create's own block
+			// characters rather than of text.
+			String bar = lineOf(GBDisplaySources.BATTERY_CHARGE.get(), battery, 0).getString();
+			helper.assertTrue(!bar.isEmpty() && bar.chars()
+				.allMatch(c -> c == '\u2588' || c == '\u2592'),
+				"the charge source's default should be a progress bar, it rendered '" + bar + "'");
+
+			// Mode 1 is the percentage, and it must be a whole one. Catnip's number formatter keeps
+			// three decimal places until a client-side update() that never runs on a server, so
+			// formatting this by hand read "66.667%" on a multiplayer board.
+			String percent = lineOf(GBDisplaySources.BATTERY_CHARGE.get(), battery, 1).getString();
+			helper.assertTrue(percent.endsWith("%") && !percent.contains(".") && !percent.contains(","),
+				"the charge percentage should be a whole number, it rendered '" + percent + "'");
 			helper.succeed();
 		});
 	}
 
 	/**
 	 * Only the source's own line is under test, so the context is a stub: a real one carries a Display
-	 * Link block entity, and SingleLineDisplaySource reads the optional label out of its config.
+	 * Link block entity, and the sources read their label, their mode and the target's width off it.
+	 *
+	 * <p>{@code mode} is the source's own config value — 0 is a progress bar for the charge source and 1
+	 * a percentage.
 	 */
-	private static MutableComponent lineOf(DisplaySource source, GravityBatteryBlockEntity battery) {
+	private static MutableComponent lineOf(DisplaySource source, GravityBatteryBlockEntity battery,
+		int mode) {
+		CompoundTag config = new CompoundTag();
+		config.putInt("Mode", mode);
 		List<MutableComponent> lines =
 			source.provideText(new DisplayLinkContext(battery.getLevel(), null) {
 				@Override
@@ -611,15 +696,27 @@ public class GBGameTests {
 				}
 
 				@Override
-				public CompoundTag sourceConfig() {
-					return new CompoundTag();
+				public BlockEntity getTargetBlockEntity() {
+					return null;
 				}
-			}, null);
+
+				@Override
+				public CompoundTag sourceConfig() {
+					return config;
+				}
+			}, STUB_TARGET);
 		return lines.isEmpty() ? Component.empty() : lines.get(0);
 	}
 
+	/**
+	 * A target wide enough to render into. Was {@code null} until the charge source moved onto Create's
+	 * progress-bar base, which asks the target how many columns it has — so the stub stopped being
+	 * harmless the moment the source it exercises got better.
+	 */
+	private static final DisplayTargetStats STUB_TARGET = new DisplayTargetStats(4, 16, null);
+
 	private static String keyOf(DisplaySource source, GravityBatteryBlockEntity battery) {
-		MutableComponent line = lineOf(source, battery);
+		MutableComponent line = lineOf(source, battery, 0);
 		return line.getContents() instanceof TranslatableContents contents ? contents.getKey()
 			: "<not a translatable: " + line.getString() + ">";
 	}

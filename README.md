@@ -24,9 +24,13 @@ battery is not a lift, and its charge *is* the position of that weight.
 
 Build the weight against the battery's underside and rotation alone will pick it up, no click needed.
 Right-clicking does one thing more: it reaches down the shaft, so you can hang the weight anywhere
-below and still have it found. That asymmetry is deliberate — a battery never lets go of what it
-takes, so rotation arriving on a shaft is not treated as permission to go looking for something to
-grab. Right-click again to let go; the blocks return exactly where they were.
+below and still have it found. That asymmetry is deliberate — a battery never lets go of what it takes
+on its own, so rotation arriving on a shaft is not treated as permission to go looking for something
+to grab.
+
+Mind the flush rule cuts both ways: whatever is directly under a battery is what it will pick up, so
+don't mount one straight onto a chest or a machine you meant to keep. Right-click to let go and the
+blocks return exactly where they were, so it is undoable — but it will not undo itself.
 
 From then on it decides for itself. While the rest of the network has stress capacity going spare it
 draws that surplus and winds the weight up. When the network can no longer carry its own load, it
@@ -38,19 +42,21 @@ measurement is its capacity.
 
 ## Reading one
 
-Three ways, each carrying one thing:
+Four ways, each carrying one thing:
 
 | Put this on it | And you get |
 |---|---|
 | **Goggles** | the mode, why it is idle, a charge bar, and the weight |
 | **Comparator** | the charge, 0–15 |
 | **Threshold Switch** | the charge as a percentage, with a redstone output at a level you set |
-| **Display Link** | the mode or the charge, as text on a Display Board |
+| **Display Link** | the mode, or the charge as a bar or a percentage, on a Display Board |
 
 The Threshold Switch is the one to reach for when automating: "power on when at or below 20%" is how
-you start a backup boiler before the battery runs out. Note it reads a *percentage* rather than the
-cable length in blocks — a drop is measured per installation, so a threshold in blocks would mean a
-different thing for every battery you build.
+you start a backup boiler before the battery runs out. Two things to know about it. It reads a
+*percentage* rather than the cable length in blocks — a drop is measured per installation, so a
+threshold in blocks would mean a different thing for every battery you build. And you have to open its
+UI once to set the thresholds: Create ships a switch defaulting to 128 and 64, which a 0–100 scale
+never reaches, so a freshly placed one sits silent until you tell it what to watch for.
 
 ## Power is the weight, runtime is the drop
 
@@ -143,7 +149,8 @@ energy it holds, and changes nothing about how much power it supplies — so it 
 python3 tools/generate_textures.py     # redraw every texture and the badge
 python3 tools/generate_structures.py   # the Ponder + GameTest structures and the scene's lang keys
 python3 tools/check_lang.py            # every translation key this mod asks for actually exists
-python3 tools/generate_logo.py         # the mod badge, and --size 512 for branding/
+python3 tools/generate_logo.py         # the in-jar badge at 256
+python3 tools/generate_logo.py branding/icon-512.png --size 512   # ...and the 512 CurseForge wants
 ```
 
 JDK 21. See [CLAUDE.md](CLAUDE.md) for the build quirks, the architecture, and the things that will

@@ -14,8 +14,7 @@ First release.
   shaft, so the charge readout means something in the room the battery is actually standing in.
 - The weight falls until it runs into something and stops there, and a battery whose weight is
   resting supplies nothing.
-- Goggles show the mode, why an idle battery is idle, the charge, the weight and the time left. A
-  comparator reads the charge.
+- Goggles show the mode, why an idle battery is idle, a charge bar and the weight.
 - An animated Ponder scene.
 - Reads out three ways, each carrying one thing: a comparator gives the charge 0-15, a **Threshold
   Switch** gives it as a percentage with a redstone output at a level you set, and a **Display Link**

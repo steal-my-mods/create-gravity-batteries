@@ -51,7 +51,11 @@ jobs:
             https://minecraft.curseforge.com/api/game/versions)"
           case "$status" in
             200) echo "CurseForge token accepted." ;;
-            400|401|403) echo "::error::CurseForge rejected the token (HTTP $status)."; exit 1 ;;
+            401|403) echo "::error::CurseForge rejected the token (HTTP $status)."; exit 1 ;;
+            # 400 is what a malformed token gets from this endpoint, but it is also what a changed API
+            # contract or a typo in the URL above would get. Same outcome, different thing to go and
+            # look at, so it does not send anyone off to rotate a secret that is fine.
+            400) echo "::error::CurseForge rejected the request (HTTP 400). Either CURSEFORGE_TOKEN is malformed or this check's URL is out of date."; exit 1 ;;
             *) echo "::error::Could not reach the CurseForge upload API (HTTP $status)."; exit 1 ;;
           esac
 

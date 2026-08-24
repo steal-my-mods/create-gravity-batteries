@@ -57,6 +57,9 @@ WEIGHT_LIGHT= (224.0, 156.0, 108.0)
 GRID_ALPHA = 0.28
 SHADOW_ALPHA = 0.26
 
+USAGE = ('usage: generate_logo.py [output.png] [--size N]  '
+         '(N a positive multiple of {})'.format(REFERENCE))
+
 # --- geometry, in reference pixels ---------------------------------------------
 # One factor moves all of it, and it has to leave SPRITE_SCALE a whole number -- keeping the
 # subject's pixels square is the entire reason it is scaled by an integer -- so the output size
@@ -193,12 +196,17 @@ def outside_cells(width, height, pixels):
     Which empty cells of the sprite grid are outside the subject rather than holes in it.
 
     A flood fill from the border, done at sprite resolution because that is where the answer is
-    exact and cheap -- 462 cells rather than two million supersamples.
+    exact and cheap -- 440 cells rather than two million supersamples.
 
-    The stroke needs this. A tower is mostly holes, and a stroke that does not know the difference
-    fills every gap between the legs with white and turns an open frame into a solid plinth. That is
-    what the first draft of this badge did, and it is the whole reason the subject is a frame at all
-    -- Create's badges show graph paper through their subjects' gaps.
+    The stroke needs this in general: a stroke that cannot tell a hole from the outside fills the gaps
+    between a tower's legs with white and turns an open frame into a solid plinth.
+
+    Measured on the sprite as drawn, though, it currently suppresses nothing -- all 186 transparent
+    cells are reachable from the border, so there are no enclosed holes at all. What actually keeps
+    graph paper visible between the legs is that the gaps are wider than twice STROKE. This stays
+    because the moment a drawing grows a closed opening -- a window in the headframe, a ring, a
+    counterweight with a hole in it -- the stroke needs it, and finding that out from a rendered badge
+    is much slower than keeping fifteen lines.
     """
     outside = [[False] * width for _ in range(height)]
     stack = []
@@ -403,7 +411,13 @@ def main():
     size = REFERENCE
     if '--size' in arguments:
         at = arguments.index('--size')
-        size = int(arguments[at + 1])
+        if at + 1 >= len(arguments):
+            raise SystemExit('--size needs a value: %s' % USAGE)
+        try:
+            size = int(arguments[at + 1])
+        except ValueError:
+            raise SystemExit('--size wants a whole number, got %r: %s'
+                             % (arguments[at + 1], USAGE))
         del arguments[at:at + 2]
     target = arguments[0] if arguments else 'src/main/resources/creategravitybatteries_icon.png'
 

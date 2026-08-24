@@ -1,5 +1,7 @@
 package com.creategravitybatteries.battery;
 
+import java.util.Locale;
+
 /**
  * Why an idle battery is idle. Diagnostic only — nothing branches on it. It exists because "nothing
  * is happening" is the single most confusing state a self-deciding machine can be in, and the goggles
@@ -24,7 +26,12 @@ public enum IdleReason {
 		return ordinal >= 0 && ordinal < values.length ? values[ordinal] : NONE;
 	}
 
+	/**
+	 * {@code Locale.ROOT}, not the default locale. Under a Turkish locale {@code "IDLE".toLowerCase()}
+	 * is "\u0131dle" with a dotless i, which would put a key nobody has translated on the goggles and on
+	 * a Display Board — the same silent failure as the unprefixed keys this mod shipped once.
+	 */
 	public String translationKey() {
-		return "tooltip.gravity_battery.idle." + name().toLowerCase();
+		return "tooltip.gravity_battery.idle." + name().toLowerCase(Locale.ROOT);
 	}
 }
