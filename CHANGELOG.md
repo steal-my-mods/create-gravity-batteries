@@ -32,6 +32,9 @@ that was running at the time:
   truncates to a whole block instead of snapping to a sixteenth, and `signum(0) == 0` makes "stopped"
   count as a sign change. Since a battery's offset is its charge, flicking the drive on and off was a
   way to charge it for nothing.
+- The overlay quoted a Stress figure while winding up and nothing at all while letting down.
+  `LinearActuatorBlockEntity` is not a `GeneratingKineticBlockEntity`, so the inherited overlay only
+  ever reported stress impact; the generator half had to be transcribed too.
 - The goggle overlay was too busy: a charge percentage, a paid-out-of-total and a seconds-remaining
   countdown are all the same fact, and all three flickered. It is now a status line, a charge bar in
   Create's own idiom, and the weight — calibrated against Create's Boiler, which is the densest

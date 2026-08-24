@@ -369,6 +369,53 @@ public class GBGameTests {
 		});
 	}
 
+	// --- what the goggles report ------------------------------------------------------------------
+
+	/**
+	 * A battery must have a Stress figure to report in both directions.
+	 *
+	 * <p>It did not report one while letting down. {@code LinearActuatorBlockEntity} is not a
+	 * {@code GeneratingKineticBlockEntity}, so {@code super.addToGoggleTooltip} lands on
+	 * {@code KineticBlockEntity}, which quotes {@code calculateStressApplied} and bails when it is zero
+	 * — zero for every battery that is generating. The mechanics of Create's generator class had been
+	 * transcribed and its half of the overlay had not.
+	 *
+	 * <p>This asserts the two figures the overlay reads, not the overlay itself: {@code forGoggles}
+	 * indents its lines with {@code Minecraft.getInstance().font}, so a tooltip cannot be built on a
+	 * dedicated server at all and calling it here dies with "invalid dist DEDICATED_SERVER". That the
+	 * generator half is still <em>wired into</em> {@code addToGoggleTooltip} is therefore not covered
+	 * by any test, and the call site says so.
+	 */
+	@GameTest(template = "test_rig", timeoutTicks = 400)
+	public static void bothDirectionsHaveAStressFigureToReport(GameTestHelper helper) {
+		rig(helper);
+		hangWeight(helper, 3, HIGH_TOP);
+		activate(helper, BATTERY_A);
+		drive(helper);
+
+		helper.runAfterDelay(80, () -> {
+			GravityBatteryBlockEntity battery = battery(helper, BATTERY_A);
+			helper.assertTrue(battery.getMode() == BatteryMode.CHARGING,
+				"expected to be winding up by now, was " + battery.getMode());
+			helper.assertTrue(battery.calculateStressApplied() > 0,
+				"a winding battery has no impact figure for the overlay to quote");
+			helper.assertTrue(battery.calculateAddedStressCapacity() == 0,
+				"a winding battery must not also be advertising capacity");
+			helper.setBlock(MOTOR, Blocks.AIR);
+		});
+
+		helper.runAfterDelay(180, () -> {
+			GravityBatteryBlockEntity battery = battery(helper, BATTERY_A);
+			helper.assertTrue(battery.getMode() == BatteryMode.DISCHARGING,
+				"expected to be letting down by now, was " + battery.getMode());
+			helper.assertTrue(battery.calculateAddedStressCapacity() > 0,
+				"a battery letting down has no capacity figure for the overlay to quote");
+			helper.assertTrue(battery.calculateStressApplied() == 0,
+				"a battery letting down must not also be placing a load on the network");
+			helper.succeed();
+		});
+	}
+
 	// --- lighting ----------------------------------------------------------------------------------
 
 	/**

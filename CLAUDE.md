@@ -236,6 +236,20 @@ the reason when it is idle, the bar, and the weight; the weight is the only numb
 move while a battery is holding one. The `needs X, has Y` pair is the exception, and it is behind the
 one idle reason where those two numbers are what tells a player what to change.
 
+### The Stress lines are Create's, and both halves have to be asked for
+
+`LinearActuatorBlockEntity` is **not** a `GeneratingKineticBlockEntity`, so `super.addToGoggleTooltip`
+lands on `KineticBlockEntity` — which quotes `calculateStressApplied` and bails when it is zero. That
+is zero for every battery that is letting down, so the first version quoted a figure while winding up
+and nothing at all while generating. `addGeneratedStressStats` is the missing half, transcribed like
+the rest of that class.
+
+It is **not covered by a test and cannot be**: `forGoggles` indents its lines with
+`Minecraft.getInstance().font`, so building a tooltip on a dedicated server throws "invalid dist
+DEDICATED_SERVER". `bothDirectionsHaveAStressFigureToReport` asserts the two figures those lines read
+— impact non-zero and capacity zero while winding, the reverse while letting down — and deleting the
+call itself would be silent. The call site says so.
+
 ## Balance
 
 Two numbers do all of it. `stressPerBlock` is su/RPM per block of weight; `gearReduction` is how much

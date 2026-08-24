@@ -37,6 +37,9 @@ JAVA = 'src/main/java/com/creategravitybatteries'
 # the omission that put a raw key on the goggles.
 CREATE_KEYS = {
     'generic.unit.stress',
+    'gui.goggles.generator_stats',
+    'gui.goggles.at_current_speed',
+    'tooltip.capacityProvided',
 }
 
 # Enums that derive their key from their own constant names, as `<prefix><lowercase name>`. Parsed

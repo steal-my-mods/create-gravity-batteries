@@ -830,10 +830,54 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity {
 				.forGoggles(tooltip, 1);
 		}
 
-		// Create's generator and stress lines go underneath. The return says this block filled the
-		// overlay, which it has whether or not there was any stress worth quoting.
+		// Create's own lines go underneath: the impact when winding up, the capacity when letting
+		// down. The return says this block filled the overlay, which it has whether or not there was
+		// any stress worth quoting.
 		super.addToGoggleTooltip(tooltip, isPlayerSneaking);
+		// Not covered by a test, and it cannot be: forGoggles indents with
+		// Minecraft.getInstance().font, so building a tooltip on a dedicated server throws. A GameTest
+		// can only assert the two figures these lines read, which is what
+		// bothDirectionsHaveAStressFigureToReport does. Deleting this call would be silent.
+		addGeneratedStressStats(tooltip);
 		return true;
+	}
+
+	/**
+	 * {@code GeneratingKineticBlockEntity}'s half of the overlay, transcribed for the same reason the
+	 * rest of that class is: {@link LinearActuatorBlockEntity} is not a
+	 * {@code GeneratingKineticBlockEntity}, so {@code super.addToGoggleTooltip} lands on
+	 * {@code KineticBlockEntity} — which reports {@link #calculateStressApplied()} and bails when it is
+	 * zero. That is zero for every battery that is letting down, so the overlay quoted a figure while
+	 * winding up and nothing at all while generating. Missing this was an omission in the
+	 * transcription, not a decision.
+	 *
+	 * <p>Kept faithful to Create's version, including the correction for a network running at a speed
+	 * other than the one this block declares: a generator contributes at the speed it <em>declares</em>,
+	 * so the two lines quote {@code capacity × generatedSpeed} rather than {@code capacity × networkSpeed}.
+	 */
+	private void addGeneratedStressStats(List<Component> tooltip) {
+		if (!IRotate.StressImpact.isEnabled())
+			return;
+		float stressBase = calculateAddedStressCapacity();
+		if (Mth.equal(stressBase, 0))
+			return;
+
+		CreateLang.translate("gui.goggles.generator_stats")
+			.forGoggles(tooltip);
+		CreateLang.translate("tooltip.capacityProvided")
+			.style(ChatFormatting.GRAY)
+			.forGoggles(tooltip);
+
+		float speed = getTheoreticalSpeed();
+		if (speed != getGeneratedSpeed() && speed != 0)
+			stressBase *= getGeneratedSpeed() / speed;
+		CreateLang.number(Math.abs(stressBase * speed))
+			.translate("generic.unit.stress")
+			.style(ChatFormatting.AQUA)
+			.space()
+			.add(CreateLang.translate("gui.goggles.at_current_speed")
+				.style(ChatFormatting.DARK_GRAY))
+			.forGoggles(tooltip, 1);
 	}
 
 	/** Segments in the charge bar. Ten, so a tick of movement is usually not a visible change. */
