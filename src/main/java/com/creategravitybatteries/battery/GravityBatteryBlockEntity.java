@@ -24,6 +24,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.HolderLookup.Provider;
 import net.minecraft.core.Vec3i;
 import net.minecraft.nbt.CompoundTag;
+import net.createmod.catnip.lang.LangBuilder;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
@@ -530,6 +531,32 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity {
 	}
 
 	/**
+	 * Keeps the offset exactly where it was across a speed change.
+	 *
+	 * <p>{@code LinearActuatorBlockEntity#onSpeedChanged} re-grids the offset whenever the rotation's
+	 * sign changes with a contraption attached, and the arithmetic is
+	 * {@code Math.round(offset * 16f) / 16} — an <em>integer</em> division. Confirmed in Create's
+	 * bytecode: {@code Math.round:(F)I}, {@code bipush 16}, {@code idiv}, {@code i2f}. So it does not
+	 * snap to a sixteenth of a block as it clearly means to, it truncates to a whole one.
+	 *
+	 * <p>A Rope Pulley barely notices, because it re-grids on stop anyway. For a battery the offset
+	 * <em>is</em> the charge, which made this free energy rather than a cosmetic jump:
+	 * {@code Math.signum(0) == 0}, so every transition from turning to stopped counts as a sign change,
+	 * and each one lifted the weight by up to a whole block without paying a single Stress Unit for it.
+	 * Flicking the drive on and off was a charging strategy. {@code losingTheDriveDoesNotMoveTheWeight}
+	 * is the lock.
+	 */
+	@Override
+	public void onSpeedChanged(float prevSpeed) {
+		float keep = offset;
+		super.onSpeedChanged(prevSpeed);
+		if (offset == keep)
+			return;
+		offset = keep;
+		resetContraptionToOffset();
+	}
+
+	/**
 	 * The weight has found the floor. Recording where is what stops a blocked battery generating for
 	 * nothing: capacity is only ever supplied while the weight is actually descending, and
 	 * {@link #canDescend()} is what enforces that.
@@ -745,22 +772,32 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity {
 
 	// --- goggles ----------------------------------------------------------------------------------
 
+	/**
+	 * Modelled on Create's Boiler, which is the densest overlay Create ships and still only manages a
+	 * status line and three bars. Two rules taken from it: a level that changes every tick is a
+	 * <em>bar</em>, not a number, and a rate that changes every tick is left to the Stress line Create
+	 * already draws.
+	 *
+	 * <p>An earlier version had a charge percentage, a paid-out-of-total, and a seconds-remaining
+	 * countdown. All three are the same fact — where the weight is — and all three flickered. The bar
+	 * moves in ten steps, and the only other number here is the weight, which does not move at all
+	 * while the battery is holding one. Create's own Steam Engine, for comparison, adds nothing to its
+	 * overlay beyond the two lines every generator gets.
+	 */
 	@Override
 	public boolean addToGoggleTooltip(List<Component> tooltip, boolean isPlayerSneaking) {
-		GBLang.translate("tooltip.gravity_battery.title")
+		GBLang
+			.translate("tooltip.gravity_battery.status", GBLang.translate(mode.translationKey())
+				.style(modeColour())
+				.component())
 			.forGoggles(tooltip);
-
-		GBLang.translate("tooltip.gravity_battery.mode")
-			.style(ChatFormatting.GRAY)
-			.forGoggles(tooltip, 1);
-		GBLang.translate(mode.translationKey())
-			.style(modeColour())
-			.forGoggles(tooltip, 2);
 
 		if (mode == BatteryMode.IDLE && idleReason != IdleReason.NONE) {
 			GBLang.translate(idleReason.translationKey())
 				.style(ChatFormatting.DARK_GRAY)
-				.forGoggles(tooltip, 2);
+				.forGoggles(tooltip, 1);
+			// Only for this one reason, and only because it is the number that tells a player what to
+			// change. It is two moving figures, so it stays behind a state nothing else shows.
 			if (idleReason == IdleReason.NO_SURPLUS)
 				GBLang
 					.translate("tooltip.gravity_battery.needs",
@@ -770,62 +807,49 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity {
 							.number(Math.max(0, networkCapacityWithoutSelf() - networkStressWithoutSelf()))
 							.translate("generic.unit.stress"))
 					.style(ChatFormatting.DARK_GRAY)
-					.forGoggles(tooltip, 2);
+					.forGoggles(tooltip, 1);
 		}
 
 		if (weightBlocks > 0) {
 			GBLang.translate("tooltip.gravity_battery.charge")
 				.style(ChatFormatting.GRAY)
+				.space()
+				.add(chargeBar())
 				.forGoggles(tooltip, 1);
-			CreateLang.number(getChargeFraction() * 100)
-				.text("%")
-				.style(ChatFormatting.GOLD)
-				.forGoggles(tooltip, 2);
 
 			GBLang.translate("tooltip.gravity_battery.weight")
 				.style(ChatFormatting.GRAY)
-				.forGoggles(tooltip, 1);
-			// Create ships no "generic.unit.blocks" -- its generic.unit.* set is buckets, degrees,
-			// millibuckets, minutes, rpm, seconds, stress and ticks. Borrowing a key that does not
-			// exist puts the key itself on the goggles, so this unit is ours.
-			CreateLang.number(weightBlocks)
 				.space()
-				.add(GBLang.translate("tooltip.gravity_battery.unit.blocks"))
-				.style(ChatFormatting.GOLD)
-				.forGoggles(tooltip, 2);
-
-			GBLang.translate("tooltip.gravity_battery.drop")
-				.style(ChatFormatting.GRAY)
+				// Create ships no "generic.unit.blocks" -- its generic.unit.* set is buckets, degrees,
+				// millibuckets, minutes, rpm, seconds, stress and ticks. Borrowing a key that does not
+				// exist puts the key itself on the goggles, so this unit is ours.
+				.add(CreateLang.number(weightBlocks)
+					.space()
+					.add(GBLang.translate("tooltip.gravity_battery.unit.blocks"))
+					.style(ChatFormatting.GOLD))
 				.forGoggles(tooltip, 1);
-			CreateLang.number(offset)
-				.text(" / ")
-				.add(CreateLang.number(restingOffset))
-				.style(ChatFormatting.GOLD)
-				.forGoggles(tooltip, 2);
-
-			if (mode == BatteryMode.DISCHARGING) {
-				GBLang.translate("tooltip.gravity_battery.remaining")
-					.style(ChatFormatting.GRAY)
-					.forGoggles(tooltip, 1);
-				CreateLang.number(secondsRemaining())
-					.text("s")
-					.style(ChatFormatting.GREEN)
-					.forGoggles(tooltip, 2);
-			}
 		}
 
-		// Create's generator lines go underneath. The return says this block filled the overlay, which
-		// it has whether or not there was any stress worth quoting.
+		// Create's generator and stress lines go underneath. The return says this block filled the
+		// overlay, which it has whether or not there was any stress worth quoting.
 		super.addToGoggleTooltip(tooltip, isPlayerSneaking);
 		return true;
 	}
 
-	/** How long the weight has left at the rate it is descending now. */
-	private float secondsRemaining() {
-		float perTick = Math.abs(getMovementSpeed());
-		if (perTick <= 1.0E-5F)
-			return 0;
-		return (restingOffset - offset) / perTick / 20F;
+	/** Segments in the charge bar. Ten, so a tick of movement is usually not a visible change. */
+	private static final int BAR_SEGMENTS = 10;
+
+	/**
+	 * A charge bar in Create's own idiom — {@code |} repeated and coloured, the same glyph the Boiler
+	 * draws its size, water and heat with.
+	 */
+	private LangBuilder chargeBar() {
+		int filled = Mth.clamp(Mth.ceil(getChargeFraction() * BAR_SEGMENTS), 0, BAR_SEGMENTS);
+		return GBLang.builder()
+			.add(Component.literal("|".repeat(filled))
+				.withStyle(ChatFormatting.GREEN))
+			.add(Component.literal("|".repeat(BAR_SEGMENTS - filled))
+				.withStyle(ChatFormatting.DARK_GRAY));
 	}
 
 	private ChatFormatting modeColour() {

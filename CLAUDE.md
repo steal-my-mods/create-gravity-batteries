@@ -157,6 +157,15 @@ mappings, so the output uses the same names the code here compiles against.
   millibuckets, minutes, rpm, seconds, stress and ticks. Borrowing a key from another mod's namespace
   that does not exist puts the key on screen, so `check_lang.py` holds an allowlist of the Create keys
   this mod leans on and refuses a new one until someone has looked it up.
+- **`LinearActuatorBlockEntity#onSpeedChanged` truncates the offset to a whole block, and for a
+  battery that is free energy.** It re-grids on a rotation sign change, and the arithmetic is
+  `Math.round(offset * 16f) / 16` — an *integer* division. Confirmed in Create's bytecode:
+  `Math.round:(F)I`, `bipush 16`, `idiv`, `i2f`. It means to snap to a sixteenth and truncates to a
+  whole one. A Rope Pulley barely notices because it re-grids on stop anyway; here the offset *is* the
+  charge, and `Math.signum(0) == 0` makes every transition from turning to stopped a sign change — so
+  each one lifted the weight by up to a block without paying a Stress Unit. Flicking the drive on and
+  off was a charging strategy. `onSpeedChanged` is overridden to put the offset back, and
+  `losingTheDriveDoesNotMoveTheWeight` is the lock. Do not "simplify" the override away.
 - **The block needs `noOcclusion()`, and not for decoration.** A block entity renderer is handed the
   light level at the block's own position, and inside a full-cube occluder that is zero — which drew
   the spinning shaft through the middle of the battery almost black. The model is a frame with an open
@@ -206,6 +215,26 @@ mappings, so the output uses the same names the code here compiles against.
 - **`getExtensionRange()` is absolute-Y based, so it is small in a GameTest.** The test world places
   the rig around y=-51, which leaves a range of about 12. Fine for the rig, but don't write a test that
   assumes 64.
+
+## The goggle overlay
+
+Calibrated against Create rather than invented. Create's Steam Engine — a tiered generator with an
+efficiency source, so the closest analogue this mod has — adds **nothing** to its overlay beyond the
+two lines every generator gets. Create's densest overlay is the Boiler, and it is a status line plus
+three *bars*.
+
+Two rules taken from that:
+
+- **A level that changes every tick is a bar, not a number.** The charge bar is `|` repeated and
+  coloured, the same glyph the Boiler draws its size, water and heat with, in ten steps so a single
+  tick of movement is usually not a visible change.
+- **A rate that changes every tick is left to the Stress line Create already draws.**
+
+The first version had a charge percentage, a paid-out-of-total, and a seconds-remaining countdown.
+All three are the same fact — where the weight is — and all three flickered. What is left is the mode,
+the reason when it is idle, the bar, and the weight; the weight is the only number, and it does not
+move while a battery is holding one. The `needs X, has Y` pair is the exception, and it is behind the
+one idle reason where those two numbers are what tells a player what to change.
 
 ## Balance
 

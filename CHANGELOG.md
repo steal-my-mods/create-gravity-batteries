@@ -27,6 +27,15 @@ that was running at the time:
 - The first section of cable below the battery rendered almost black. Light is read from the block a
   segment hangs in, and the topmost segment hangs less than a block down by design, so truncating its
   offset sampled the light inside the battery itself.
+- The weight jumped, usually upward and by up to a whole block, whenever the shaft stopped or
+  reversed. Create's actuator re-grids the offset on a sign change using an integer division, so it
+  truncates to a whole block instead of snapping to a sixteenth, and `signum(0) == 0` makes "stopped"
+  count as a sign change. Since a battery's offset is its charge, flicking the drive on and off was a
+  way to charge it for nothing.
+- The goggle overlay was too busy: a charge percentage, a paid-out-of-total and a seconds-remaining
+  countdown are all the same fact, and all three flickered. It is now a status line, a charge bar in
+  Create's own idiom, and the weight — calibrated against Create's Boiler, which is the densest
+  overlay Create ships.
 - The shaft spinning through the middle of the battery rendered almost black. Same symptom, different
   cause: the block was missing `noOcclusion()`, and a block entity renderer is handed the light level
   at its block's own position — zero, inside a full-cube occluder. That also blocked all light from

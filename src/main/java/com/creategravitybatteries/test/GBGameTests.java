@@ -231,6 +231,41 @@ public class GBGameTests {
 		});
 	}
 
+	/**
+	 * Losing the drive must not move the weight. Create's actuator re-grids the offset on a sign
+	 * change and truncates it to a whole block doing so, and {@code signum(0) == 0} makes "stopped" a
+	 * sign change — so this fired every time the shaft went still, lifting the weight by up to a block
+	 * for free. Flicking a lever was a charging strategy.
+	 *
+	 * <p>The offset has to be genuinely fractional when the drive goes away or truncation is a no-op
+	 * and the test proves nothing, so that is asserted first.
+	 */
+	@GameTest(template = "test_rig", timeoutTicks = 300)
+	public static void losingTheDriveDoesNotMoveTheWeight(GameTestHelper helper) {
+		rig(helper);
+		hangWeight(helper, 3, HIGH_TOP);
+		activate(helper, BATTERY_A);
+		drive(helper);
+
+		float[] before = new float[1];
+		helper.runAfterDelay(100, () -> {
+			before[0] = battery(helper, BATTERY_A).offset;
+			float fraction = before[0] - (int) before[0];
+			helper.assertTrue(fraction > 0.2F && fraction < 0.8F,
+				"this test needs a fractional offset to mean anything, the weight is at " + before[0]);
+			helper.setBlock(MOTOR, Blocks.AIR);
+		});
+
+		// Five ticks is enough for the propagator to notice and for any snap to have happened, and at
+		// most 0.08 blocks of the battery's own descent at its top speed.
+		helper.runAfterDelay(105, () -> {
+			float now = battery(helper, BATTERY_A).offset;
+			helper.assertTrue(Math.abs(now - before[0]) < 0.15F,
+				"the weight jumped when the drive went away: " + before[0] + " -> " + now);
+			helper.succeed();
+		});
+	}
+
 	// --- the two properties a self-deciding block has to have -------------------------------------
 
 	/**
