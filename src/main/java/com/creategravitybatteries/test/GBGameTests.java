@@ -14,12 +14,19 @@ import com.creategravitybatteries.battery.CableGeometry;
 import com.creategravitybatteries.battery.GravityBatteryBlockEntity;
 import com.creategravitybatteries.battery.IdleReason;
 import com.creategravitybatteries.registry.GBBlocks;
+import com.creategravitybatteries.registry.GBDisplaySources;
 import com.simibubi.create.AllBlocks;
+import com.simibubi.create.api.behaviour.display.DisplaySource;
 import com.simibubi.create.content.kinetics.base.HorizontalAxisKineticBlock;
+import com.simibubi.create.content.redstone.displayLink.DisplayLinkContext;
+import com.simibubi.create.content.redstone.thresholdSwitch.ThresholdSwitchObservable;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestAssertException;
 import net.minecraft.gametest.framework.GameTestHelper;
@@ -53,6 +60,8 @@ import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 @GameTestHolder(CreateGravityBatteries.ID)
 @PrefixGameTestTemplate(false)
 public class GBGameTests {
+
+	private static final String NAMESPACE = CreateGravityBatteries.ID;
 
 	private static final int SITE = 11;
 	private static final int SHAFT_Y = 9;
@@ -484,6 +493,137 @@ public class GBGameTests {
 		return comparator.getOutputSignal();
 	}
 
+	// --- Threshold Switch and Display Link ---------------------------------------------------------
+
+	/**
+	 * A Threshold Switch reads the charge as a percentage. Percent and not the offset in blocks, which
+	 * is what Create's Rope Pulley reports: a drop is measured per installation, so a threshold in
+	 * blocks would mean a different thing for every battery in the world.
+	 */
+	@GameTest(template = "test_rig", timeoutTicks = 300)
+	public static void aThresholdSwitchReadsTheChargeAsAPercentage(GameTestHelper helper) {
+		rig(helper);
+		hangWeight(helper, 3, HIGH_TOP);
+		activate(helper, BATTERY_A);
+		drive(helper);
+
+		int[] before = new int[1];
+		helper.runAfterDelay(SETTLE_TICKS + 5, () -> {
+			ThresholdSwitchObservable observable = battery(helper, BATTERY_A);
+			helper.assertTrue(observable.getMinValue() == 0 && observable.getMaxValue() == 100,
+				"the scale should be 0..100, it is " + observable.getMinValue() + ".."
+					+ observable.getMaxValue());
+			before[0] = observable.getCurrentValue();
+			helper.assertTrue(before[0] > 0 && before[0] < 100,
+				"a part-charged battery should read between the ends, it reads " + before[0]);
+		});
+
+		helper.runAfterDelay(250, () -> {
+			int now = battery(helper, BATTERY_A).getCurrentValue();
+			helper.assertTrue(now > before[0],
+				"winding up should raise the reading: " + before[0] + " -> " + now);
+			helper.succeed();
+		});
+	}
+
+	/**
+	 * Both ends of the Threshold Switch's scale, which is what a player's threshold setting is measured
+	 * against: a resting weight reads 0 and a fully wound one reads 100.
+	 *
+	 * <p>Asserting only that the reading rises is not enough — it rises just as happily if the value is
+	 * the offset in blocks, which is what Create's Rope Pulley reports and what this deliberately does
+	 * not. Nothing is placed on the shaft, so neither battery has anything to drive and neither starts
+	 * letting its weight down while the ends are being read.
+	 */
+	@GameTest(template = "test_rig", timeoutTicks = 200)
+	public static void theThresholdScaleRunsFromRestingToFullyWound(GameTestHelper helper) {
+		floor(helper);
+		placeBattery(helper, BATTERY_A);
+		placeBattery(helper, BATTERY_B);
+		hangWeight(helper, 3, SHAFT_Y - 1); // flush under A, so A is fully wound
+		hangWeight(helper, 5, RESTING_TOP); // on the floor under B, so B is spent
+		activate(helper, BATTERY_A);
+		activate(helper, BATTERY_B);
+
+		helper.runAfterDelay(SETTLE_TICKS, () -> {
+			int wound = battery(helper, BATTERY_A).getCurrentValue();
+			int spent = battery(helper, BATTERY_B).getCurrentValue();
+			helper.assertTrue(wound == 100, "a fully wound battery should read 100, it reads " + wound);
+			helper.assertTrue(spent == 0, "a resting weight should read 0, it reads " + spent);
+			helper.succeed();
+		});
+	}
+
+	/**
+	 * The Display Link sources. Both are server-safe by construction — unlike the goggle overlay, which
+	 * cannot be built outside a client at all — so what a Display Board would show is assertable here.
+	 *
+	 * <p>The status source reports the idle <em>reason</em> rather than the word "Holding", because on a
+	 * board read from across the room "Nothing attached" is the useful half.
+	 */
+	@GameTest(template = "test_rig", timeoutTicks = 300)
+	public static void theDisplaySourcesReportModeAndCharge(GameTestHelper helper) {
+		rig(helper);
+		hangWeight(helper, 3, HIGH_TOP);
+		activate(helper, BATTERY_A);
+		drive(helper);
+
+		helper.runAfterDelay(80, () -> {
+			GravityBatteryBlockEntity battery = battery(helper, BATTERY_A);
+			helper.assertTrue(battery.getMode() == BatteryMode.CHARGING,
+				"expected to be winding up by now, was " + battery.getMode());
+
+			// Registering a source is only half of it: DisplaySource.BY_BLOCK is what makes a Display
+			// Link offer them on this block, and Create's own blocks get that entry from a Registrate
+			// transform this mod does not use. Without GBDisplaySources.attach the sources exist and
+			// are unreachable, which no amount of calling them directly would notice.
+			List<DisplaySource> offered =
+				DisplaySource.getAll(helper.getLevel(), helper.absolutePos(BATTERY_A));
+			helper.assertTrue(offered.contains(GBDisplaySources.BATTERY_STATUS.get()),
+				"a Display Link is not offered the status source on this block");
+			helper.assertTrue(offered.contains(GBDisplaySources.BATTERY_CHARGE.get()),
+				"a Display Link is not offered the charge source on this block");
+
+			helper.assertTrue(
+				keyOf(GBDisplaySources.BATTERY_STATUS.get(), battery)
+					.equals(NAMESPACE + ".tooltip.gravity_battery.mode.charging"),
+				"the status source said " + keyOf(GBDisplaySources.BATTERY_STATUS.get(), battery));
+
+			// The charge source is a number and a literal "%", so it has no key of its own -- assert it
+			// renders something with a digit in it rather than an empty line.
+			String charge = lineOf(GBDisplaySources.BATTERY_CHARGE.get(), battery).getString();
+			helper.assertTrue(charge.endsWith("%") && charge.chars()
+				.anyMatch(Character::isDigit), "the charge source rendered '" + charge + "'");
+			helper.succeed();
+		});
+	}
+
+	/**
+	 * Only the source's own line is under test, so the context is a stub: a real one carries a Display
+	 * Link block entity, and SingleLineDisplaySource reads the optional label out of its config.
+	 */
+	private static MutableComponent lineOf(DisplaySource source, GravityBatteryBlockEntity battery) {
+		List<MutableComponent> lines =
+			source.provideText(new DisplayLinkContext(battery.getLevel(), null) {
+				@Override
+				public BlockEntity getSourceBlockEntity() {
+					return battery;
+				}
+
+				@Override
+				public CompoundTag sourceConfig() {
+					return new CompoundTag();
+				}
+			}, null);
+		return lines.isEmpty() ? Component.empty() : lines.get(0);
+	}
+
+	private static String keyOf(DisplaySource source, GravityBatteryBlockEntity battery) {
+		MutableComponent line = lineOf(source, battery);
+		return line.getContents() instanceof TranslatableContents contents ? contents.getKey()
+			: "<not a translatable: " + line.getString() + ">";
+	}
+
 	// --- what the goggles report ------------------------------------------------------------------
 
 	/**
@@ -666,11 +806,15 @@ public class GBGameTests {
 
 	private static void rig(GameTestHelper helper) {
 		floor(helper);
-		helper.setBlock(BATTERY_A, GBBlocks.GRAVITY_BATTERY.get()
-			.defaultBlockState()
-			.setValue(HorizontalAxisKineticBlock.HORIZONTAL_AXIS, Direction.Axis.X));
+		placeBattery(helper, BATTERY_A);
 		helper.setBlock(SHAFT, AllBlocks.SHAFT.getDefaultState()
 			.setValue(BlockStateProperties.AXIS, Direction.Axis.X));
+	}
+
+	private static void placeBattery(GameTestHelper helper, BlockPos pos) {
+		helper.setBlock(pos, GBBlocks.GRAVITY_BATTERY.get()
+			.defaultBlockState()
+			.setValue(HorizontalAxisKineticBlock.HORIZONTAL_AXIS, Direction.Axis.X));
 	}
 
 	/** Puts the creative motor on the west end of the shaft, driving east into battery A. */

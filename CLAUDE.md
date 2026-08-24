@@ -63,6 +63,8 @@ mappings, so the output uses the same names the code here compiles against.
 | `tools/generate_structures.py` | The Ponder structure, the GameTest template, and the scene's lang keys |
 | `tools/check_lang.py` | Resolves every key the code asks for and fails if it is missing |
 | `battery/CableGeometry` | Where the cable's pieces go. Out of the client package so a GameTest can reach it |
+| `battery/display/*DisplaySource` | What a Display Board shows: the mode on one, the charge on the other |
+| `registry/GBDisplaySources` | Registers those, and — separately — tells a Display Link the block offers them |
 
 ## Things that will bite you
 
@@ -180,6 +182,26 @@ mappings, so the output uses the same names the code here compiles against.
   charge for carrying blocks, and re-winding costs full price, so it is a one-off per installation
   rather than a loop. Do not "fix" it by refusing to assemble above the resting point — that would also
   forbid the ordinary case of re-attaching a weight that is part-way up.
+- **Three redstone surfaces, each carrying one thing.** A comparator reads the charge 0–15; a
+  Threshold Switch reads it 0–100 and fires at a configured level; a Display Link reads either the mode
+  or the charge as text. Deliberately not one channel carrying two facts — encoding the mode into the
+  comparator was considered and rejected, because it would cost the level reading that every other
+  block in the game uses that channel for.
+- **A Threshold Switch needs no registration: Create finds it by `instanceof ThresholdSwitchObservable`.**
+  It reports percent, not the offset in blocks that Create's Rope Pulley reports, because a drop is
+  measured per installation — a threshold in blocks would mean a different thing for every battery in
+  the world. `theThresholdScaleRunsFromRestingToFullyWound` asserts both ends, and it has to: a test
+  that only asserts the reading *rises* passes just as happily on the offset in blocks.
+- **A Display Link source needs registration *and* attachment, and only the second one is easy to
+  forget.** `DeferredRegister` into `CreateRegistries.DISPLAY_SOURCE` creates the source;
+  `DisplaySource.BY_BLOCK.add(block, source)` in `GBDisplaySources.attach` is what makes a Display Link
+  offer it on this block. Create's own blocks get that second half from a Registrate transform this mod
+  does not use, so it is a hand-written call at common setup. Without it the sources exist and are
+  unreachable — and a test that calls `provideLine` directly would never notice, which is why
+  `theDisplaySourcesReportModeAndCharge` asserts through `DisplaySource.getAll` as well.
+- **A Display Link source's name comes from its registry id**, as
+  `<namespace>.display_source.<path>`, and appears in nothing that looks like a translation call. It is
+  in `check_lang.py`'s coverage for that reason.
 - **`hasAnalogOutputSignal` is only half of a comparator output.** Nothing polls it: a block has to
   call `level.updateNeighbourForOutputSignal` when the value moves, which `refreshComparator` does once
   per changed step. Without it the reading a comparator latched when it was placed never changed again

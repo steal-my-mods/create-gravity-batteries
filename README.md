@@ -30,11 +30,27 @@ grab. Right-click again to let go; the blocks return exactly where they were.
 
 From then on it decides for itself. While the rest of the network has stress capacity going spare it
 draws that surplus and winds the weight up. When the network can no longer carry its own load, it
-lets the weight back down and the descent drives the shaft. A comparator reads the charge.
+lets the weight back down and the descent drives the shaft.
 
 The weight falls until it runs into something and stops there. That is not a limitation to work
 around, it is the design — the battery measures the drop when it picks the weight up, and that
 measurement is its capacity.
+
+## Reading one
+
+Three ways, each carrying one thing:
+
+| Put this on it | And you get |
+|---|---|
+| **Goggles** | the mode, why it is idle, a charge bar, and the weight |
+| **Comparator** | the charge, 0–15 |
+| **Threshold Switch** | the charge as a percentage, with a redstone output at a level you set |
+| **Display Link** | the mode or the charge, as text on a Display Board |
+
+The Threshold Switch is the one to reach for when automating: "power on when at or below 20%" is how
+you start a backup boiler before the battery runs out. Note it reads a *percentage* rather than the
+cable length in blocks — a drop is measured per installation, so a threshold in blocks would mean a
+different thing for every battery you build.
 
 ## Power is the weight, runtime is the drop
 

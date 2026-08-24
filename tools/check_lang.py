@@ -54,6 +54,11 @@ KEY_DERIVING_ENUMS = [
 # matching behaviour renders as a heading with nothing under it.
 ITEM_DESCRIPTIONS = ['block.%s.gravity_battery' % NAMESPACE]
 
+# Display Link sources are named in the link's UI by a key Create derives from the registry id --
+# `<namespace>.display_source.<path>` -- so the ids are user-visible and none of them appears in a
+# .translate(...) call anywhere. Read out of the registry class so adding a source is covered.
+DISPLAY_SOURCES = os.path.join(JAVA, 'registry', 'GBDisplaySources.java')
+
 
 def load_lang():
     with open(LANG) as handle:
@@ -118,6 +123,16 @@ def enum_keys():
     return keys
 
 
+def display_source_keys():
+    """`<namespace>.display_source.<id>` for every source registered."""
+    source = open(DISPLAY_SOURCES).read()
+    ids = re.findall(r'DISPLAY_SOURCES\.register\(\s*"([^"]+)"', source)
+    if not ids:
+        raise SystemExit('%s: found no registered display sources; update this check'
+                         % DISPLAY_SOURCES)
+    return [(DISPLAY_SOURCES, '%s.display_source.%s' % (NAMESPACE, name)) for name in ids]
+
+
 def main():
     lang = load_lang()
     problems = []
@@ -142,6 +157,12 @@ def main():
         checked += 1
         if NAMESPACE + '.' + key not in lang:
             problems.append('%s: %s.%s is not in en_us.json' % (path, NAMESPACE, key))
+
+    for path, key in display_source_keys():
+        checked += 1
+        if key not in lang:
+            problems.append('%s: %s is not in en_us.json, so the Display Link menu shows the raw key'
+                            % (path, key))
 
     for base in ITEM_DESCRIPTIONS:
         checked += 1

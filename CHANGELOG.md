@@ -17,6 +17,9 @@ First release.
 - Goggles show the mode, why an idle battery is idle, the charge, the weight and the time left. A
   comparator reads the charge.
 - An animated Ponder scene.
+- Reads out three ways, each carrying one thing: a comparator gives the charge 0-15, a **Threshold
+  Switch** gives it as a percentage with a redstone output at a level you set, and a **Display Link**
+  puts either the mode or the charge on a Display Board.
 
 Fixed before release, both found by looking at the block in-game and neither catchable by anything
 that was running at the time:

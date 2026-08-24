@@ -3,6 +3,7 @@ package com.creategravitybatteries;
 import com.creategravitybatteries.registry.GBBlockEntities;
 import com.creategravitybatteries.registry.GBBlocks;
 import com.creategravitybatteries.registry.GBContraptionTypes;
+import com.creategravitybatteries.registry.GBDisplaySources;
 import com.creategravitybatteries.registry.GBItems;
 
 import net.minecraft.resources.ResourceLocation;
@@ -38,8 +39,10 @@ public class CreateGravityBatteries {
 		GBItems.ITEMS.register(modBus);
 		GBItems.TABS.register(modBus);
 		GBContraptionTypes.CONTRAPTION_TYPES.register(modBus);
+		GBDisplaySources.DISPLAY_SOURCES.register(modBus);
 
 		modBus.addListener(GBBlocks::registerStressValues);
+		modBus.addListener(GBDisplaySources::attach);
 
 		if (FMLEnvironment.dist == Dist.CLIENT)
 			com.creategravitybatteries.client.GBClient.init(modBus);

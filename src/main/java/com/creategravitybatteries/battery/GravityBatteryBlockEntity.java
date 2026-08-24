@@ -12,6 +12,7 @@ import com.simibubi.create.content.contraptions.piston.LinearActuatorBlockEntity
 import com.simibubi.create.content.kinetics.KineticNetwork;
 import com.simibubi.create.content.kinetics.base.IRotate;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
+import com.simibubi.create.content.redstone.thresholdSwitch.ThresholdSwitchObservable;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import com.simibubi.create.foundation.blockEntity.behaviour.CenteredSideValueBoxTransform;
 import com.simibubi.create.foundation.blockEntity.behaviour.ValueBoxTransform;
@@ -26,6 +27,7 @@ import net.minecraft.core.Vec3i;
 import net.minecraft.nbt.CompoundTag;
 import net.createmod.catnip.lang.LangBuilder;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
@@ -74,7 +76,8 @@ import org.jetbrains.annotations.Nullable;
  * {@code GeneratingKineticBlockEntity}'s, transcribed rather than inherited because Java has one
  * superclass and the actuator had already claimed it. See NOTICE.md.
  */
-public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity {
+public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
+	implements ThresholdSwitchObservable {
 
 	/**
 	 * Ticks to wait before deciding anything. A block that has only just been placed has not been
@@ -970,6 +973,38 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity {
 		if (weightBlocks <= 0)
 			return 0;
 		return Mth.clamp(Mth.ceil(getChargeFraction() * 15), 0, 15);
+	}
+
+	// --- Threshold Switch -------------------------------------------------------------------------
+
+	/**
+	 * A Threshold Switch reads a battery's charge as a percentage, so "start the backup boiler when it
+	 * drops below 20%" is a redstone line rather than a mod feature.
+	 *
+	 * <p>Percent rather than the offset in blocks, which is what Create's Rope Pulley reports. A drop is
+	 * measured per installation, so a threshold in blocks would mean something different for every
+	 * battery in the world; a percentage is the same promise everywhere. Create finds this by
+	 * {@code instanceof} — implementing the interface is the whole registration.
+	 */
+	@Override
+	public int getCurrentValue() {
+		return Math.round(getChargeFraction() * 100);
+	}
+
+	@Override
+	public int getMinValue() {
+		return 0;
+	}
+
+	@Override
+	public int getMaxValue() {
+		return 100;
+	}
+
+	@Override
+	public MutableComponent format(int value) {
+		return GBLang.translate("threshold_switch.charge", value)
+			.component();
 	}
 
 	@Nullable
