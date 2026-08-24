@@ -1,0 +1,34 @@
+{
+  "parent": "block/block",
+  "textures": {
+    "hook": "creategravitybatteries:block/gravity_battery_hook",
+    "particle": "creategravitybatteries:block/gravity_battery_hook"
+  },
+  "elements": [
+    {
+      "name": "collar",
+      "from": [5, 0, 5],
+      "to": [11, 3, 11],
+      "faces": {
+        "north": {"texture": "#hook"},
+        "east": {"texture": "#hook"},
+        "south": {"texture": "#hook"},
+        "west": {"texture": "#hook"},
+        "up": {"texture": "#hook"},
+        "down": {"texture": "#hook"}
+      }
+    },
+    {
+      "name": "neck",
+      "from": [6, 3, 6],
+      "to": [10, 5, 10],
+      "faces": {
+        "north": {"texture": "#hook"},
+        "east": {"texture": "#hook"},
+        "south": {"texture": "#hook"},
+        "west": {"texture": "#hook"},
+        "up": {"texture": "#hook"}
+      }
+    }
+  ]
+}

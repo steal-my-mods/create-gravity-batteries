@@ -1,0 +1,20 @@
+{
+  "parent": "block/block",
+  "textures": {
+    "cable": "creategravitybatteries:block/gravity_battery_cable",
+    "particle": "creategravitybatteries:block/gravity_battery_cable"
+  },
+  "elements": [
+    {
+      "name": "cable",
+      "from": [6, 0, 6],
+      "to": [10, 16, 10],
+      "faces": {
+        "north": {"texture": "#cable"},
+        "east": {"texture": "#cable"},
+        "south": {"texture": "#cable"},
+        "west": {"texture": "#cable"}
+      }
+    }
+  ]
+}

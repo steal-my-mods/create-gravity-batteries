@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:block",
+  "pools": [
+    {
+      "rolls": 1.0,
+      "bonus_rolls": 0.0,
+      "conditions": [
+        {
+          "condition": "minecraft:survives_explosion"
+        }
+      ],
+      "entries": [
+        {
+          "type": "minecraft:item",
+          "name": "creategravitybatteries:gravity_battery"
+        }
+      ]
+    }
+  ],
+  "random_sequence": "creategravitybatteries:blocks/gravity_battery"
+}

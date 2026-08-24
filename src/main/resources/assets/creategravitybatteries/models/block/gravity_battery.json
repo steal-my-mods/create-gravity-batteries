@@ -1,0 +1,106 @@
+{
+  "parent": "block/block",
+  "textures": {
+    "casing": "creategravitybatteries:block/gravity_battery_casing",
+    "drum": "creategravitybatteries:block/gravity_battery_drum",
+    "particle": "creategravitybatteries:block/gravity_battery_casing"
+  },
+  "elements": [
+    {
+      "name": "west cheek",
+      "from": [0, 0, 0],
+      "to": [2, 16, 16],
+      "faces": {
+        "north": {"texture": "#casing"},
+        "east": {"texture": "#casing"},
+        "south": {"texture": "#casing"},
+        "west": {"texture": "#casing"},
+        "up": {"texture": "#casing"},
+        "down": {"texture": "#casing"}
+      }
+    },
+    {
+      "name": "east cheek",
+      "from": [14, 0, 0],
+      "to": [16, 16, 16],
+      "faces": {
+        "north": {"texture": "#casing"},
+        "east": {"texture": "#casing"},
+        "south": {"texture": "#casing"},
+        "west": {"texture": "#casing"},
+        "up": {"texture": "#casing"},
+        "down": {"texture": "#casing"}
+      }
+    },
+    {
+      "name": "hood",
+      "from": [2, 13, 0],
+      "to": [14, 16, 16],
+      "faces": {
+        "north": {"texture": "#casing"},
+        "south": {"texture": "#casing"},
+        "up": {"texture": "#casing"},
+        "down": {"texture": "#casing"}
+      }
+    },
+    {
+      "name": "north sill",
+      "from": [2, 0, 0],
+      "to": [14, 2, 3],
+      "faces": {
+        "north": {"texture": "#casing"},
+        "south": {"texture": "#casing"},
+        "up": {"texture": "#casing"},
+        "down": {"texture": "#casing"}
+      }
+    },
+    {
+      "name": "south sill",
+      "from": [2, 0, 13],
+      "to": [14, 2, 16],
+      "faces": {
+        "north": {"texture": "#casing"},
+        "south": {"texture": "#casing"},
+        "up": {"texture": "#casing"},
+        "down": {"texture": "#casing"}
+      }
+    },
+    {
+      "name": "north flange",
+      "from": [3, 3, 4],
+      "to": [13, 13, 6],
+      "faces": {
+        "north": {"texture": "#drum"},
+        "east": {"texture": "#drum"},
+        "south": {"texture": "#drum"},
+        "west": {"texture": "#drum"},
+        "up": {"texture": "#drum"},
+        "down": {"texture": "#drum"}
+      }
+    },
+    {
+      "name": "south flange",
+      "from": [3, 3, 10],
+      "to": [13, 13, 12],
+      "faces": {
+        "north": {"texture": "#drum"},
+        "east": {"texture": "#drum"},
+        "south": {"texture": "#drum"},
+        "west": {"texture": "#drum"},
+        "up": {"texture": "#drum"},
+        "down": {"texture": "#drum"}
+      }
+    },
+    {
+      "name": "spool",
+      "from": [5, 5, 6],
+      "to": [11, 11, 10],
+      "faces": {
+        "east": {"texture": "#drum"},
+        "west": {"texture": "#drum"},
+        "up": {"texture": "#drum"},
+        "down": {"texture": "#drum"}
+      }
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "variants": {
+    "axis=x": {
+      "model": "creategravitybatteries:block/gravity_battery",
+      "y": 90
+    },
+    "axis=z": {
+      "model": "creategravitybatteries:block/gravity_battery"
+    }
+  }
+}

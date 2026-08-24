@@ -1,0 +1,66 @@
+name: Release
+
+# Tag a release and this uploads it: `git tag v0.1.0 && git push origin v0.1.0`.
+# CurseForge needs one repository secret you create yourself, CURSEFORGE_TOKEN; the project id is
+# already in gradle.properties and is a public identifier, not a secret. An absent token fails at
+# upload rather than at configuration, so rehearse with `./gradlew publishMods -PdryRun=true` and
+# check both destinations are named before tagging. GITHUB_TOKEN is provided by Actions.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write # to create the GitHub release
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # A tag that disagrees with mod_version would publish the jar under the wrong number, and
+      # neither site lets you rename a file after upload.
+      - name: Check the tag matches mod_version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tagged="${GITHUB_REF_NAME#v}"
+          declared="$(sed -n 's/^mod_version=//p' gradle.properties)"
+          if [ "$tagged" != "$declared" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match mod_version=${declared}"
+            exit 1
+          fi
+
+      - name: Build
+        run: ./gradlew build
+
+      - name: Accept the EULA for the test server
+        run: |
+          mkdir -p run-gametest
+          echo 'eula=true' > run-gametest/eula.txt
+
+      # Never publish something that cannot pass its own tests.
+      - name: GameTests
+        run: ./gradlew runGameTestServer
+
+      # Same gate as the build workflow, because a release is the worst place to discover a stale
+      # generated file.
+      - name: Generated assets are up to date
+        run: |
+          python3 tools/generate_textures.py
+          python3 tools/generate_structures.py
+          git add -A
+          git diff --cached --exit-code
+
+      - name: Publish
+        run: ./gradlew publishMods
+        env:
+          CURSEFORGE_TOKEN: ${{ secrets.CURSEFORGE_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
