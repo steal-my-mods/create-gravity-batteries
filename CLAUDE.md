@@ -16,6 +16,7 @@ winding up on the network's surplus and letting down to drive the shaft when the
 python3 tools/generate_textures.py     # redraw every texture and the badge
 python3 tools/generate_structures.py   # the Ponder + GameTest structures and the scene's lang keys
 python3 tools/check_lang.py            # every translation key this mod asks for actually exists
+python3 tools/generate_logo.py         # the mod badge, and --size 512 for branding/
 ```
 
 JDK 21 required. `gradle/gradle-daemon-jvm.properties` pins the daemon to it, so the commands work
@@ -59,7 +60,8 @@ mappings, so the output uses the same names the code here compiles against.
 | `client/ponder/GravityBatteryScenes` | The Ponder scene. Its structure is generated, not authored in-game |
 | `client/ponder/AnimateGravityBatteryInstruction` | Subclasses Create's animation instruction so the scene can wind the cable |
 | `GBConfig` | The whole balance, in two numbers that matter |
-| `tools/generate_textures.py` | Every texture, plus the mod icon and the branding badge |
+| `tools/generate_textures.py` | Every block texture |
+| `tools/generate_logo.py` | The Create-family badge: the blueprint disc and the subject on it |
 | `tools/generate_structures.py` | The Ponder structure, the GameTest template, and the scene's lang keys |
 | `tools/check_lang.py` | Resolves every key the code asks for and fails if it is missing |
 | `battery/CableGeometry` | Where the cable's pieces go. Out of the client package so a GameTest can reach it |
@@ -182,6 +184,17 @@ mappings, so the output uses the same names the code here compiles against.
   charge for carrying blocks, and re-winding costs full price, so it is a one-off per installation
   rather than a loop. Do not "fix" it by refusing to assemble above the resting point — that would also
   forbid the ordinary case of re-attaching a weight that is part-way up.
+- **The badge is one object, not a scene, and nine drafts proved it.** Both sibling addons' badges
+  are a single bold subject; at seven screen pixels per sprite pixel behind a thick white stroke,
+  there is room for about four shapes and no more. Every attempt at a whole winding tower — splayed
+  legs, cross-bracing, a headframe wheel, a base slab — resolved into something already familiar: a
+  bell, a padlock, a bookshelf, a lamp, a picture frame. The rules that came out of it are in
+  `subject_sprite`'s docstring, and the two worth repeating are that splayed legs over a block make a
+  padlock, and a closed rectangle around anything makes a picture frame.
+- **The stroke must know a hole from the outside.** `outside_cells` flood-fills the sprite grid from
+  its border, and only those cells may take white. Without it the stroke fills every gap in the frame
+  and an open gantry comes out a solid plinth — which is what the first draft did. Create's own badges
+  show graph paper through their subjects' gaps, so this is not optional to match them.
 - **Three redstone surfaces, each carrying one thing.** A comparator reads the charge 0–15; a
   Threshold Switch reads it 0–100 and fires at a configured level; a Display Link reads either the mode
   or the charge as text. Deliberately not one channel carrying two facts — encoding the mode into the

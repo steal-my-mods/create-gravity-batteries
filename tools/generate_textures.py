@@ -12,7 +12,7 @@ byte-identical files and a diff in the repo means someone changed the drawing.
 
     python3 tools/generate_textures.py
 
-Writes into src/main/resources (block textures and the mod icon) and branding/.
+The mod badge is not here -- it is tools/generate_logo.py, which draws the Create-family disc.
 """
 
 import os
@@ -21,8 +21,6 @@ import sys
 import zlib
 
 BLOCKS = 'src/main/resources/assets/creategravitybatteries/textures/block'
-ICON = 'src/main/resources/creategravitybatteries_icon.png'
-BRANDING = 'branding/icon-512.png'
 
 
 # --- PNG ---------------------------------------------------------------------------------------
@@ -176,40 +174,6 @@ def hook():
     return pixels
 
 
-# --- the badge ---------------------------------------------------------------------------------
-
-
-def badge(size):
-    """
-    The mod icon: a weight on a cable under a drum. Drawn at 16x16 and scaled by whole pixels, so
-    every size is the same picture rather than a resampled one.
-    """
-    cell = canvas(16, (28, 30, 34, 255))
-    grain(cell, 16, 53, 4)
-    # the housing
-    rect(cell, 16, 2, 1, 14, 4, IRON)
-    rect(cell, 16, 2, 1, 14, 2, IRON_LIGHT)
-    # the drum, centred in it
-    rect(cell, 16, 6, 2, 10, 4, BRASS)
-    put(cell, 16, 6, 2, BRASS_LIGHT)
-    put(cell, 16, 9, 3, BRASS_DARK)
-    # the cable
-    rect(cell, 16, 7, 4, 9, 9, STEEL)
-    rect(cell, 16, 7, 4, 8, 9, STEEL_LIGHT)
-    # the weight
-    rect(cell, 16, 4, 9, 12, 15, IRON)
-    rect(cell, 16, 4, 9, 12, 10, IRON_LIGHT)
-    rect(cell, 16, 4, 14, 12, 15, IRON_DARK)
-    rivets(cell, 16, [(6, 12), (10, 12)], IRON_DARK, IRON_LIGHT)
-
-    scale = max(1, size // 16)
-    out = []
-    for y in range(size):
-        for x in range(size):
-            out.append(cell[min(15, y // scale) * 16 + min(15, x // scale)])
-    return out
-
-
 # --- main --------------------------------------------------------------------------------------
 
 TEXTURES = {
@@ -226,11 +190,6 @@ def main():
         path = os.path.join(root, name + '.png')
         write_png(path, 16, 16, draw())
         print('wrote %s' % path)
-
-    write_png(ICON, 128, 128, badge(128))
-    print('wrote %s' % ICON)
-    write_png(BRANDING, 512, 512, badge(512))
-    print('wrote %s' % BRANDING)
 
 
 if __name__ == '__main__':
