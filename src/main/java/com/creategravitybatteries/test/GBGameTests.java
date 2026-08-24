@@ -30,6 +30,7 @@ import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.Property;
@@ -329,6 +330,34 @@ public class GBGameTests {
 			GravityBatteryBlockEntity battery = battery(helper, BATTERY_A);
 			helper.assertTrue(!battery.running, "the battery should have let go");
 			helper.assertBlockPresent(Blocks.SLIME_BLOCK, new BlockPos(3, HIGH_TOP, 5));
+			helper.succeed();
+		});
+	}
+
+	// --- lighting ----------------------------------------------------------------------------------
+
+	/**
+	 * The lock on a bug that shipped: the shaft spinning through the middle of the battery rendered
+	 * almost black.
+	 *
+	 * <p>A block entity renderer is handed the light level at the block's own position, and inside a
+	 * full-cube occluder that is zero. Nothing about the renderer was wrong — the block was, for
+	 * missing {@code noOcclusion()}. Expressed here in the two terms a dedicated server can see: the
+	 * state must not occlude, and light from outside must actually arrive at the block's position.
+	 */
+	@GameTest(template = "test_rig", timeoutTicks = 200)
+	public static void theBatteryDoesNotBlockItsOwnLight(GameTestHelper helper) {
+		rig(helper);
+		helper.setBlock(new BlockPos(3, SHAFT_Y + 1, 5), Blocks.GLOWSTONE);
+
+		helper.runAfterDelay(10, () -> {
+			helper.assertTrue(!helper.getBlockState(BATTERY_A)
+				.canOcclude(),
+				"the battery occludes like a solid cube, so its renderer is handed no light");
+			int light = helper.getLevel()
+				.getBrightness(LightLayer.BLOCK, helper.absolutePos(BATTERY_A));
+			helper.assertTrue(light > 0,
+				"glowstone is against the battery and the light at its own position is still " + light);
 			helper.succeed();
 		});
 	}

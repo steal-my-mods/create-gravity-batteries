@@ -27,3 +27,7 @@ that was running at the time:
 - The first section of cable below the battery rendered almost black. Light is read from the block a
   segment hangs in, and the topmost segment hangs less than a block down by design, so truncating its
   offset sampled the light inside the battery itself.
+- The shaft spinning through the middle of the battery rendered almost black. Same symptom, different
+  cause: the block was missing `noOcclusion()`, and a block entity renderer is handed the light level
+  at its block's own position — zero, inside a full-cube occluder. That also blocked all light from
+  reaching anything below the battery and had neighbours cull faces you can see through.

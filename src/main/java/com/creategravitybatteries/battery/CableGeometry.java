@@ -41,10 +41,15 @@ public final class CableGeometry {
 	 * Which block to read the light level from for a piece drawn {@code offset} below the battery.
 	 *
 	 * <p>Never the battery's own position, and that {@code max} is the whole point of this method.
-	 * Truncating an offset under 1 gives 0, which samples the light <em>inside</em> the battery block —
-	 * and since the topmost cable segment always has an offset under 1 by design, the first section of
-	 * cable rendered almost black while every section below it looked right. Create's pulley truncates
-	 * the same way and gets away with it because it never draws a full segment that close to the block.
+	 * Truncating an offset under 1 gives 0, which samples the light <em>inside</em> the battery rather
+	 * than in the open air the cable hangs in — and since the topmost cable segment always has an offset
+	 * under 1 by design, the first section of cable rendered almost black while every section below it
+	 * looked right. Create's pulley truncates the same way and gets away with it because it never draws
+	 * a full segment that close to the block.
+	 *
+	 * <p>Independent of the block's {@code noOcclusion()}, which fixed the same symptom for the shaft.
+	 * That one is why there is any light at the battery's position at all; this one is why the cable
+	 * reads the position it actually occupies. Either alone leaves the other wrong.
 	 */
 	public static BlockPos lightSource(BlockPos batteryPos, float offset) {
 		return batteryPos.below(Math.max(1, (int) offset));

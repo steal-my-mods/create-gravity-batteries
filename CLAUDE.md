@@ -157,12 +157,22 @@ mappings, so the output uses the same names the code here compiles against.
   millibuckets, minutes, rpm, seconds, stress and ticks. Borrowing a key from another mod's namespace
   that does not exist puts the key on screen, so `check_lang.py` holds an allowlist of the Create keys
   this mod leans on and refuses a new one until someone has looked it up.
+- **The block needs `noOcclusion()`, and not for decoration.** A block entity renderer is handed the
+  light level at the block's own position, and inside a full-cube occluder that is zero — which drew
+  the spinning shaft through the middle of the battery almost black. The model is a frame with an open
+  middle and a slot in the bottom for the cable, so occluding like a solid cube was wrong on three
+  counts: the renderer got no light, nothing below the battery got any either, and neighbours culled
+  faces you can see straight through to. Create's Rope Pulley sets it for the same reason.
+  `theBatteryDoesNotBlockItsOwnLight` asserts both halves a server can see — that the state does not
+  occlude, and that light from a glowstone actually arrives.
 - **The cable's light comes from the block a segment hangs in, and 0 blocks below the battery is the
   battery.** `CableGeometry.lightSource` clamps to at least one below for that reason. The topmost
   segment always has an offset under 1 — that is the point of anchoring the cable at the weight — so
   truncating gave 0 and the first section of cable rendered almost black while everything under it
   looked right. Create's pulley truncates the same way and gets away with it because it never draws a
   full segment that close to the block. `cableGeometryNeverLightsFromInsideTheBattery` is the lock.
+  Independent of `noOcclusion()`: that one is why there is light at the battery's position at all, this
+  one is why the cable reads the position it occupies. Either alone leaves the other wrong.
 - **`CableGeometry` is out of the client package on purpose.** A GameTest runs on a dedicated server,
   which cannot load a class that mentions `PoseStack`, so cable arithmetic that lives in the renderer
   cannot be tested at all. Moving the rules out is what made a rendering bug lockable.

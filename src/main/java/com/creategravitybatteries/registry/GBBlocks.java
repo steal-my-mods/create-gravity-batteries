@@ -21,6 +21,13 @@ public class GBBlocks {
 			.mapColor(MapColor.PODZOL)
 			.strength(3.0F, 6.0F)
 			.sound(SoundType.NETHERITE_BLOCK)
+			// Not decoration. A block entity renderer is handed the light level at the block's own
+			// position, and inside a full-cube occluder that is zero -- which drew the shaft through
+			// the middle of the battery almost black. The model is a frame with an open middle and a
+			// slot in the bottom for the cable, so occluding like a solid cube was wrong anyway: it
+			// also blocked all light from reaching anything below, and had neighbours cull the faces
+			// you can see straight through to. Create's own Rope Pulley sets this for the same reason.
+			.noOcclusion()
 			.requiresCorrectToolForDrops()));
 
 	/**
