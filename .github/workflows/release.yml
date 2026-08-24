@@ -1,14 +1,22 @@
 name: Release
 
 # Tag a release and this uploads it: `git tag v0.1.0 && git push origin v0.1.0`.
+#
 # CurseForge needs one repository secret you create yourself, CURSEFORGE_TOKEN; the project id is
-# already in gradle.properties and is a public identifier, not a secret. An absent token fails at
-# upload rather than at configuration, so rehearse with `./gradlew publishMods -PdryRun=true` and
-# check both destinations are named before tagging. GITHUB_TOKEN is provided by Actions.
+# already in gradle.properties and is a public identifier, not a secret. GITHUB_TOKEN is provided
+# by Actions.
+#
+# Run it by hand (workflow_dispatch) and it rehearses by default -- everything except the upload.
+# Untick "Rehearse" to publish for real from a branch.
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Rehearse without uploading anything'
+        type: boolean
+        default: true
 
 permissions:
   contents: write # to create the GitHub release
@@ -18,6 +26,32 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # First, and deliberately before the build: `publishMods` uploads to CurseForge and to GitHub
+      # Releases, and a token that is missing or expired fails at *upload*. By then GitHub may have
+      # accepted the release already, which leaves a version published on one site and not the other
+      # -- and neither site lets you rename or replace a file after upload. Five seconds of curl
+      # turns that into a failure before anything has been published anywhere.
+      #
+      # The endpoint is the CurseForge upload API's cheapest authenticated GET. A valid token gets
+      # 200, a bad one 403; anything else is treated as CurseForge being unwell rather than as a bad
+      # token, because failing a release over a 502 would be its own kind of wrong.
+      - name: Check the CurseForge token
+        env:
+          CURSEFORGE_TOKEN: ${{ secrets.CURSEFORGE_TOKEN }}
+        run: |
+          if [ -z "$CURSEFORGE_TOKEN" ]; then
+            echo "::error::CURSEFORGE_TOKEN is not set on this repository."
+            exit 1
+          fi
+          status="$(curl -s -o /dev/null -w '%{http_code}' \
+            -H "X-Api-Token: $CURSEFORGE_TOKEN" \
+            https://minecraft.curseforge.com/api/game/versions)"
+          case "$status" in
+            200) echo "CurseForge token accepted." ;;
+            401|403) echo "::error::CurseForge rejected the token (HTTP $status)."; exit 1 ;;
+            *) echo "::error::Could not reach the CurseForge upload API (HTTP $status)."; exit 1 ;;
+          esac
 
       - uses: actions/setup-java@v4
         with:
@@ -60,7 +94,9 @@ jobs:
           git diff --cached --exit-code
 
       - name: Publish
-        run: ./gradlew publishMods
+        run: ./gradlew publishMods $EXTRA_ARGS
         env:
+          # A manual run rehearses unless told otherwise; a tag push always publishes for real.
+          EXTRA_ARGS: ${{ (github.event_name == 'workflow_dispatch' && inputs.dry_run) && '-PdryRun=true' || '' }}
           CURSEFORGE_TOKEN: ${{ secrets.CURSEFORGE_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

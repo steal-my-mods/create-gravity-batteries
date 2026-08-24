@@ -227,6 +227,17 @@ Releases go out through `publishMods` (`me.modmuss50.mod-publish-plugin`), drive
   provider so an ordinary `./gradlew build` never trips over it.
 - **The release workflow checks the tag against `mod_version`.** A tag that disagrees would publish the
   jar under the wrong number, and neither site lets you rename a file after upload.
+- **The CurseForge token is checked with curl before anything is built.** `publishMods` uploads to two
+  sites, and a missing or expired token fails at *upload* — by which point GitHub may already have
+  accepted the release, leaving a version published on one site and not the other. Five seconds of
+  curl against the upload API's cheapest authenticated GET turns that into a failure before anything
+  has shipped anywhere. A 401/403 fails the release; any other non-200 also fails, but says
+  "could not reach" rather than blaming the token, because a 502 from CurseForge is not a bad secret.
+- **Running the release workflow by hand rehearses by default.** `workflow_dispatch` has a `dry_run`
+  input defaulting to true, so a manual trigger runs the whole path — token check, build, GameTests,
+  generator diff, changelog lookup — and writes what it *would* have uploaded instead of uploading it.
+  A tag push always publishes for real. Without the default, a curious click on "Run workflow" from
+  `dev` publishes whatever `mod_version` currently says.
 - **Both workflows re-run the generators and fail on a diff.** Every texture, the badge, the Ponder
   structure and the GameTest template are generated, so a stale checked-in file would ship in the jar.
   The check stages first (`git add -A` then `git diff --cached`) because a bare `git diff` says nothing
