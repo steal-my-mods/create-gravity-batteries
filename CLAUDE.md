@@ -166,6 +166,20 @@ mappings, so the output uses the same names the code here compiles against.
   each one lifted the weight by up to a block without paying a Stress Unit. Flicking the drive on and
   off was a charging strategy. `onSpeedChanged` is overridden to put the offset back, and
   `losingTheDriveDoesNotMoveTheWeight` is the lock. Do not "simplify" the override away.
+- **Rotation arriving may only take a weight that is flush; only a right-click may reach.**
+  `findWeightOffset(mayReach)`. The two halves were each reasonable and together were a block-eater:
+  assembling on a speed change is inherited Rope Pulley behaviour, and scanning down the shaft for the
+  weight is this mod's, so an unattended battery that got power walked up to `maxCableLength` blocks
+  down, tore the first solid thing it found out of the world, and never let go — because never letting
+  go is the whole point of the block. A player right-clicking is looking at it, asked for it, and can
+  undo it with a second click. `aPoweredBatteryDoesNotEatTheFloor` is the lock, and
+  `activatingReachesForAWeightFurtherDown` keeps the other half honest.
+- **A battery installed with its weight already up is installed charged, and that is deliberate.**
+  Nothing stops a player building the weight flush under a battery at the top of a 60-block shaft and
+  activating it, which is a full charge for the cost of carrying the blocks up. Minecraft does not
+  charge for carrying blocks, and re-winding costs full price, so it is a one-off per installation
+  rather than a loop. Do not "fix" it by refusing to assemble above the resting point — that would also
+  forbid the ordinary case of re-attaching a weight that is part-way up.
 - **`hasAnalogOutputSignal` is only half of a comparator output.** Nothing polls it: a block has to
   call `level.updateNeighbourForOutputSignal` when the value moves, which `refreshComparator` does once
   per changed step. Without it the reading a comparator latched when it was placed never changed again
@@ -313,8 +327,9 @@ Releases go out through `publishMods` (`me.modmuss50.mod-publish-plugin`), drive
   sites, and a missing or expired token fails at *upload* — by which point GitHub may already have
   accepted the release, leaving a version published on one site and not the other. Five seconds of
   curl against the upload API's cheapest authenticated GET turns that into a failure before anything
-  has shipped anywhere. A 401/403 fails the release; any other non-200 also fails, but says
-  "could not reach" rather than blaming the token, because a 502 from CurseForge is not a bad secret.
+  has shipped anywhere. The status codes were measured against the real API rather than assumed: 200
+  valid, **400 malformed**, 401 absent. All three fail the release as a bad token; anything else fails
+  it as "could not reach CurseForge", because a 502 is not a bad secret.
 - **Running the release workflow by hand rehearses by default.** `workflow_dispatch` has a `dry_run`
   input defaulting to true, so a manual trigger runs the whole path — token check, build, GameTests,
   generator diff, changelog lookup — and writes what it *would* have uploaded instead of uploading it.

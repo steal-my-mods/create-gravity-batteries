@@ -22,10 +22,15 @@ Put a **Gravity Battery** on a shaft the way you would a Rope Pulley, build some
 glue it together, and right-click the battery. It takes hold of the weight and does not let go — a
 battery is not a lift, and its charge *is* the position of that weight.
 
+Build the weight against the battery's underside and rotation alone will pick it up, no click needed.
+Right-clicking does one thing more: it reaches down the shaft, so you can hang the weight anywhere
+below and still have it found. That asymmetry is deliberate — a battery never lets go of what it
+takes, so rotation arriving on a shaft is not treated as permission to go looking for something to
+grab. Right-click again to let go; the blocks return exactly where they were.
+
 From then on it decides for itself. While the rest of the network has stress capacity going spare it
 draws that surplus and winds the weight up. When the network can no longer carry its own load, it
-lets the weight back down and the descent drives the shaft. Right-click again to let go; a comparator
-reads the charge.
+lets the weight back down and the descent drives the shaft. A comparator reads the charge.
 
 The weight falls until it runs into something and stops there. That is not a limitation to work
 around, it is the design — the battery measures the drop when it picks the weight up, and that

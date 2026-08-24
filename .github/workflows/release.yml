@@ -30,12 +30,13 @@ jobs:
       # First, and deliberately before the build: `publishMods` uploads to CurseForge and to GitHub
       # Releases, and a token that is missing or expired fails at *upload*. By then GitHub may have
       # accepted the release already, which leaves a version published on one site and not the other
-      # -- and neither site lets you rename or replace a file after upload. Five seconds of curl
+      # -- and neither site lets you rename or replace a file after upload. A few seconds of curl
       # turns that into a failure before anything has been published anywhere.
       #
-      # The endpoint is the CurseForge upload API's cheapest authenticated GET. A valid token gets
-      # 200, a bad one 403; anything else is treated as CurseForge being unwell rather than as a bad
-      # token, because failing a release over a 502 would be its own kind of wrong.
+      # The endpoint is the CurseForge upload API's cheapest authenticated GET. Measured against the
+      # real API rather than assumed: a valid token gets 200, a malformed one 400, an absent one 401.
+      # Anything else is reported as CurseForge being unwell rather than as a bad secret, because
+      # failing a release over a 502 would be its own kind of wrong.
       - name: Check the CurseForge token
         env:
           CURSEFORGE_TOKEN: ${{ secrets.CURSEFORGE_TOKEN }}
@@ -45,11 +46,12 @@ jobs:
             exit 1
           fi
           status="$(curl -s -o /dev/null -w '%{http_code}' \
+            --max-time 30 \
             -H "X-Api-Token: $CURSEFORGE_TOKEN" \
             https://minecraft.curseforge.com/api/game/versions)"
           case "$status" in
             200) echo "CurseForge token accepted." ;;
-            401|403) echo "::error::CurseForge rejected the token (HTTP $status)."; exit 1 ;;
+            400|401|403) echo "::error::CurseForge rejected the token (HTTP $status)."; exit 1 ;;
             *) echo "::error::Could not reach the CurseForge upload API (HTTP $status)."; exit 1 ;;
           esac
 

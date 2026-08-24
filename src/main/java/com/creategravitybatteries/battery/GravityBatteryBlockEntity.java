@@ -427,9 +427,10 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity {
 
 	// --- assembly ---------------------------------------------------------------------------------
 
+	/** The player's path: an explicit activation may reach down the shaft for a weight. */
 	private void tryAssemble() {
 		try {
-			assemble();
+			assemble(true);
 			lastException = null;
 		} catch (AssemblyException e) {
 			lastException = e;
@@ -438,22 +439,28 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity {
 	}
 
 	/**
-	 * Picks up whatever is hanging below.
-	 *
-	 * <p>Unlike a Rope Pulley this does not walk down a column of rope blocks, because there are none
-	 * to walk: a battery's cable is drawn, not placed, so the only record of where the weight is
-	 * hanging is the block that is actually there. Scanning down for the first block that is not air
-	 * is therefore both the simplest rule and the most forgiving one — build the weight anywhere in
-	 * the shaft below and the battery will find it.
+	 * The rotation path. Rotation arriving at a battery is not permission to go looking for something
+	 * to pick up — see {@link #findWeightOffset(boolean)}.
 	 */
 	@Override
 	protected void assemble() throws AssemblyException {
+		assemble(false);
+	}
+
+	/**
+	 * Picks up the weight hanging below.
+	 *
+	 * <p>Unlike a Rope Pulley this does not walk down a column of rope blocks, because there are none
+	 * to walk: a battery's cable is drawn, not placed, so the only record of where a weight hangs is
+	 * the block that is actually there.
+	 */
+	private void assemble(boolean mayReach) throws AssemblyException {
 		if (level == null || level.isClientSide)
 			return;
 		if (movedContraption != null)
 			return;
 
-		int found = findWeightOffset();
+		int found = findWeightOffset(mayReach);
 		if (found < 0)
 			return;
 
@@ -480,15 +487,45 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity {
 		sendData();
 	}
 
-	private int findWeightOffset() {
+	/**
+	 * Where the weight is, if there is one.
+	 *
+	 * <p>Three rules, in order, and the third one is only offered to a player.
+	 *
+	 * <ol>
+	 * <li>The offset this battery was last holding a weight at, so one that was deliberately released
+	 * can be handed the same weight back without rebuilding it.
+	 * <li>Flush against the battery, which is where a Rope Pulley picks its load up from.
+	 * <li>Anywhere down the shaft — <em>only</em> when a player has right-clicked the block.
+	 * </ol>
+	 *
+	 * <p>That last restriction is not fussiness. Rotation reaching a battery is not a request: an
+	 * unattended battery that got power would walk up to {@link GBConfig#maxCableLength} blocks down,
+	 * find the first solid thing, and tear it out of the world — someone's floor, or the terrain — and
+	 * then never let go of it, because that is what a battery does. A player right-clicking the block is
+	 * looking at it, has asked for it, and can undo it with a second click; rotation arriving on a shaft
+	 * is none of those things.
+	 */
+	private int findWeightOffset(boolean mayReach) {
 		int range = getExtensionRange();
-		for (int candidate = 0; candidate <= range; candidate++) {
-			BlockPos pos = worldPosition.below(candidate + 1);
-			BlockState state = level.getBlockState(pos);
-			if (!state.isAir() && !state.canBeReplaced())
+
+		int remembered = Mth.floor(offset);
+		if (remembered > 0 && remembered <= range && isWeightAt(remembered))
+			return remembered;
+		if (isWeightAt(0))
+			return 0;
+		if (!mayReach)
+			return -1;
+
+		for (int candidate = 1; candidate <= range; candidate++)
+			if (isWeightAt(candidate))
 				return candidate;
-		}
 		return -1;
+	}
+
+	private boolean isWeightAt(int candidate) {
+		BlockState state = level.getBlockState(worldPosition.below(candidate + 1));
+		return !state.isAir() && !state.canBeReplaced();
 	}
 
 	/**

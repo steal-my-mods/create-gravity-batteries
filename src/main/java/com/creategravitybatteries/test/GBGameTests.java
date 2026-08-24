@@ -371,6 +371,68 @@ public class GBGameTests {
 		});
 	}
 
+	// --- what rotation alone is allowed to pick up -------------------------------------------------
+
+	/** Rotation arriving is enough to take hold of a weight hung flush, the way a Rope Pulley does. */
+	@GameTest(template = "test_rig", timeoutTicks = 200)
+	public static void rotationAloneTakesHoldOfAFlushWeight(GameTestHelper helper) {
+		rig(helper);
+		hangWeight(helper, 3, SHAFT_Y - 1);
+		drive(helper); // deliberately no activate()
+
+		helper.runAfterDelay(SETTLE_TICKS + 10, () -> {
+			GravityBatteryBlockEntity battery = battery(helper, BATTERY_A);
+			helper.assertTrue(battery.running,
+				"a powered battery should take hold of the weight against its underside");
+			helper.assertTrue(battery.getWeightBlocks() == WEIGHT_BLOCKS,
+				"it took " + battery.getWeightBlocks() + " blocks, expected " + WEIGHT_BLOCKS);
+			helper.succeed();
+		});
+	}
+
+	/**
+	 * An unattended battery that gets power must not go looking for something to pick up.
+	 *
+	 * <p>It used to. The weight search walked down the shaft for the first solid block, which combined
+	 * with assembling on rotation meant a battery placed over a base and then powered tore the floor
+	 * out of the world from up to {@link GBConfig#maxCableLength} blocks away — and then never let go,
+	 * because that is what a battery does. Reaching is now only offered to a player who right-clicks.
+	 */
+	@GameTest(template = "test_rig", timeoutTicks = 200)
+	public static void aPoweredBatteryDoesNotEatTheFloor(GameTestHelper helper) {
+		rig(helper); // a floor at y=0, a battery at y=9, and nothing hung between them
+		drive(helper);
+
+		helper.runAfterDelay(SETTLE_TICKS + 10, () -> {
+			GravityBatteryBlockEntity battery = battery(helper, BATTERY_A);
+			helper.assertTrue(!battery.running,
+				"a battery with nothing hung under it took hold of something anyway");
+			helper.assertBlockPresent(Blocks.STONE, new BlockPos(3, 0, 5));
+			helper.assertTrue(battery.getIdleReason() == IdleReason.NO_WEIGHT,
+				"...and it should say there is nothing attached; it says " + battery.getIdleReason());
+			helper.succeed();
+		});
+	}
+
+	/** A player's activation still reaches, which is the whole reason the two paths differ. */
+	@GameTest(template = "test_rig", timeoutTicks = 200)
+	public static void activatingReachesForAWeightFurtherDown(GameTestHelper helper) {
+		rig(helper);
+		hangWeight(helper, 3, HIGH_TOP); // two blocks clear of the battery's underside
+		activate(helper, BATTERY_A);
+
+		helper.runAfterDelay(SETTLE_TICKS, () -> {
+			GravityBatteryBlockEntity battery = battery(helper, BATTERY_A);
+			helper.assertTrue(battery.running, "right-clicking should reach down for the weight");
+			// A tolerance, not an equality: with no motor on the shaft the battery is already letting
+			// the weight down by the time this runs, which is the correct behaviour and not the subject.
+			float expected = SHAFT_Y - 1 - HIGH_TOP;
+			helper.assertTrue(Math.abs(battery.offset - expected) < 0.2F,
+				"it should have found the weight at offset " + expected + ", it is at " + battery.offset);
+			helper.succeed();
+		});
+	}
+
 	// --- redstone ----------------------------------------------------------------------------------
 
 	/**

@@ -32,6 +32,10 @@ that was running at the time:
   truncates to a whole block instead of snapping to a sixteenth, and `signum(0) == 0` makes "stopped"
   count as a sign change. Since a battery's offset is its charge, flicking the drive on and off was a
   way to charge it for nothing.
+- A battery that was given rotation with nothing hung under it walked down the shaft, tore the first
+  solid block it found out of the world, and kept it. Rotation may now only take a weight that is
+  flush against the battery's underside; reaching down the shaft is offered only to a player who
+  right-clicks, who is looking at the block and can undo it with a second click.
 - The comparator output never updated. Declaring `hasAnalogOutputSignal` is only half of an analog
   output — nothing polls it — so the reading a comparator latched when it was placed stayed there for
   ever. It now follows the charge.
