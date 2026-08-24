@@ -84,6 +84,11 @@ jobs:
       - name: GameTests
         run: ./gradlew runGameTestServer
 
+      # Catnip resolves a LangBuilder key as "<namespace>.<key>", so a key written without the
+      # prefix renders as itself on the goggles and logs nothing. That shipped once.
+      - name: Translation keys resolve
+        run: python3 tools/check_lang.py
+
       # Same gate as the build workflow, because a release is the worst place to discover a stale
       # generated file.
       - name: Generated assets are up to date

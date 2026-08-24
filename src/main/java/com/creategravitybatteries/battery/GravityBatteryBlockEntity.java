@@ -785,8 +785,12 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity {
 			GBLang.translate("tooltip.gravity_battery.weight")
 				.style(ChatFormatting.GRAY)
 				.forGoggles(tooltip, 1);
+			// Create ships no "generic.unit.blocks" -- its generic.unit.* set is buckets, degrees,
+			// millibuckets, minutes, rpm, seconds, stress and ticks. Borrowing a key that does not
+			// exist puts the key itself on the goggles, so this unit is ours.
 			CreateLang.number(weightBlocks)
-				.translate("generic.unit.blocks")
+				.space()
+				.add(GBLang.translate("tooltip.gravity_battery.unit.blocks"))
 				.style(ChatFormatting.GOLD)
 				.forGoggles(tooltip, 2);
 

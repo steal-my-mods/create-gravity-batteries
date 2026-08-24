@@ -17,3 +17,13 @@ First release.
 - Goggles show the mode, why an idle battery is idle, the charge, the weight and the time left. A
   comparator reads the charge.
 - An animated Ponder scene.
+
+Fixed before release, both found by looking at the block in-game and neither catchable by anything
+that was running at the time:
+
+- Goggle overlay lines rendered as raw translation keys. Catnip resolves a LangBuilder key as
+  `<namespace>.<key>` and the lang file had them unprefixed. `tools/check_lang.py` now resolves every
+  key the code asks for, in CI.
+- The first section of cable below the battery rendered almost black. Light is read from the block a
+  segment hangs in, and the topmost segment hangs less than a block down by design, so truncating its
+  offset sampled the light inside the battery itself.

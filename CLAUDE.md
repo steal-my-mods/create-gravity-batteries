@@ -15,6 +15,7 @@ winding up on the network's surplus and letting down to drive the shaft when the
 ./gradlew publishMods -PdryRun=true   # ...or rehearse it without uploading anything
 python3 tools/generate_textures.py     # redraw every texture and the badge
 python3 tools/generate_structures.py   # the Ponder + GameTest structures and the scene's lang keys
+python3 tools/check_lang.py            # every translation key this mod asks for actually exists
 ```
 
 JDK 21 required. `gradle/gradle-daemon-jvm.properties` pins the daemon to it, so the commands work
@@ -60,6 +61,8 @@ mappings, so the output uses the same names the code here compiles against.
 | `GBConfig` | The whole balance, in two numbers that matter |
 | `tools/generate_textures.py` | Every texture, plus the mod icon and the branding badge |
 | `tools/generate_structures.py` | The Ponder structure, the GameTest template, and the scene's lang keys |
+| `tools/check_lang.py` | Resolves every key the code asks for and fails if it is missing |
+| `battery/CableGeometry` | Where the cable's pieces go. Out of the client package so a GameTest can reach it |
 
 ## Things that will bite you
 
@@ -145,6 +148,24 @@ mappings, so the output uses the same names the code here compiles against.
   `behaviours.remove(movementMode)` in `addBehaviours`. The field has to stay because the base class
   reads it through `getMovementMode()`; the scroll slot has to go because a battery has nothing to
   choose between and an inert setting is worse than none.
+- **Catnip resolves a LangBuilder key as `<namespace>.<key>`, and forgetting the prefix in the lang
+  file is invisible until someone looks at the block.** `GBLang.translate("tooltip.gravity_battery.title")`
+  looks up `creategravitybatteries.tooltip.gravity_battery.title`. The first release wrote those keys
+  unprefixed, so every line of the goggle overlay rendered as its own key and nothing logged.
+  `tools/check_lang.py` is the guard, and it runs in CI.
+- **Create ships no `generic.unit.blocks`.** Its whole `generic.unit.*` set is buckets, degrees,
+  millibuckets, minutes, rpm, seconds, stress and ticks. Borrowing a key from another mod's namespace
+  that does not exist puts the key on screen, so `check_lang.py` holds an allowlist of the Create keys
+  this mod leans on and refuses a new one until someone has looked it up.
+- **The cable's light comes from the block a segment hangs in, and 0 blocks below the battery is the
+  battery.** `CableGeometry.lightSource` clamps to at least one below for that reason. The topmost
+  segment always has an offset under 1 — that is the point of anchoring the cable at the weight — so
+  truncating gave 0 and the first section of cable rendered almost black while everything under it
+  looked right. Create's pulley truncates the same way and gets away with it because it never draws a
+  full segment that close to the block. `cableGeometryNeverLightsFromInsideTheBattery` is the lock.
+- **`CableGeometry` is out of the client package on purpose.** A GameTest runs on a dedicated server,
+  which cannot load a class that mentions `PoseStack`, so cable arithmetic that lives in the renderer
+  cannot be tested at all. Moving the rules out is what made a rendering bug lockable.
 - **Everything about a Ponder scene fails silently.** A missing structure, a bad block state and a
   missing lang key all produce a *completely clean* client log at startup and only go wrong when a
   player opens the scene. Two guards, because one cannot cover both halves:
@@ -268,10 +289,11 @@ Releases go out through `publishMods` (`me.modmuss50.mod-publish-plugin`), drive
 - **The item model is the block model.** It shows the casing and the spool but no shaft, because the
   shaft is drawn by the renderer. Create authors a separate `item.json` with the shaft baked in; doing
   the same here means duplicating the geometry, and it has not been worth it yet.
-- **Nothing has been looked at in-game beyond a clean startup.** The build, the GameTests and a dev
-  client boot are all green, and the client log has no missing-model or missing-texture warnings, but
-  no one has watched a battery wind a weight up on screen. The renderer's offsets, the spool's
-  proportions and how the scene frames itself are all unverified by eye.
+- **One in-game pass has happened and found two things, both fixed and both now locked** — the
+  unprefixed goggle keys and the dark first cable segment. Neither was catchable by anything that was
+  running at the time, which is why both guards exist now. Still unverified by eye: the Ponder scene's
+  framing at `scaleSceneView(0.9)` / `setSceneOffsetY(-1)`, the spool's proportions, and whether the
+  weight and the cable stay visually joined at speed.
 - **One scene, one language.** `en_us` only.
 
 ## Conventions

@@ -121,6 +121,7 @@ energy it holds, and changes nothing about how much power it supplies — so it 
 ./gradlew runGameTestServer  # the automated in-world tests -- the real check
 python3 tools/generate_textures.py     # redraw every texture and the badge
 python3 tools/generate_structures.py   # the Ponder + GameTest structures and the scene's lang keys
+python3 tools/check_lang.py            # every translation key this mod asks for actually exists
 ```
 
 JDK 21. See [CLAUDE.md](CLAUDE.md) for the build quirks, the architecture, and the things that will

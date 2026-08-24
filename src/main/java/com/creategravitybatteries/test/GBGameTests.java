@@ -10,6 +10,7 @@ import java.util.Set;
 import com.creategravitybatteries.CreateGravityBatteries;
 import com.creategravitybatteries.GBConfig;
 import com.creategravitybatteries.battery.BatteryMode;
+import com.creategravitybatteries.battery.CableGeometry;
 import com.creategravitybatteries.battery.GravityBatteryBlockEntity;
 import com.creategravitybatteries.battery.IdleReason;
 import com.creategravitybatteries.registry.GBBlocks;
@@ -330,6 +331,57 @@ public class GBGameTests {
 			helper.assertBlockPresent(Blocks.SLIME_BLOCK, new BlockPos(3, HIGH_TOP, 5));
 			helper.succeed();
 		});
+	}
+
+	// --- the cable's geometry ---------------------------------------------------------------------
+
+	/**
+	 * The lock on a bug that shipped: the first section of cable below the battery rendered almost
+	 * black while every section under it looked right.
+	 *
+	 * <p>Light is read from the block a piece hangs in, and the topmost segment always hangs less than
+	 * a block below the battery — that is the whole point of anchoring the cable at the weight. So
+	 * truncating its offset gives 0, and 0 blocks below the battery <em>is</em> the battery, whose
+	 * interior is dark. Nothing about this needs a world, and it is here rather than beside the renderer
+	 * because a dedicated server cannot load a class that mentions {@code PoseStack}.
+	 */
+	@GameTest(template = "test_rig", timeoutTicks = 100)
+	public static void cableGeometryNeverLightsFromInsideTheBattery(GameTestHelper helper) {
+		BlockPos battery = new BlockPos(0, 64, 0);
+		for (float length : new float[] { 0F, 0.001F, 0.3F, 0.5F, 0.999F, 1F, 1.2F, 2.3F, 7.75F, 63F }) {
+			for (int i = 0; i < CableGeometry.segments(length); i++) {
+				float offset = CableGeometry.segmentOffset(length, i);
+				BlockPos lit = CableGeometry.lightSource(battery, offset);
+				helper.assertTrue(lit.getY() <= battery.getY() - 1,
+					"cable at length " + length + " segment " + i + " (offset " + offset
+						+ ") would take its light from " + lit + ", the battery is at " + battery);
+			}
+			// And the clamp on the end, which is drawn at the full length.
+			helper.assertTrue(CableGeometry.lightSource(battery, length)
+				.getY() <= battery.getY() - 1, "the clamp at length " + length + " lights from inside");
+		}
+		helper.succeed();
+	}
+
+	/**
+	 * The invariant that lets one cable model cover every length: the bottom segment starts exactly at
+	 * the weight, and the top one runs into the casing rather than stopping short of it. Break either
+	 * and the cable has a visible seam, which is the artefact the half-height model exists to avoid in
+	 * Create's pulley.
+	 */
+	@GameTest(template = "test_rig", timeoutTicks = 100)
+	public static void theCableHasNoSeam(GameTestHelper helper) {
+		for (float length : new float[] { 0.001F, 0.3F, 1F, 1.2F, 2.3F, 7.75F, 63F }) {
+			int segments = CableGeometry.segments(length);
+			helper.assertTrue(segments >= 1, "length " + length + " drew no cable at all");
+			helper.assertTrue(CableGeometry.segmentOffset(length, 0) == length,
+				"the bottom segment must start at the weight, not at "
+					+ CableGeometry.segmentOffset(length, 0));
+			float top = CableGeometry.segmentOffset(length, segments - 1);
+			helper.assertTrue(top > 0 && top <= 1,
+				"the top segment should overshoot into the casing by under a block, it is at " + top);
+		}
+		helper.succeed();
 	}
 
 	// --- the ponder scene -------------------------------------------------------------------------

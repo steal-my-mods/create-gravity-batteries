@@ -1,5 +1,6 @@
 package com.creategravitybatteries.client;
 
+import com.creategravitybatteries.battery.CableGeometry;
 import com.creategravitybatteries.battery.GravityBatteryBlockEntity;
 import com.creategravitybatteries.battery.GravityBatteryContraption;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -31,12 +32,8 @@ import net.minecraft.world.level.block.state.BlockState;
  * inheriting that early return would draw nothing at all under the default backend — no shaft and no
  * cable, only a casing floating above a weight.
  *
- * <h2>Why the cable needs no half-block model</h2>
- * Create's pulley draws whole rope segments plus a half segment to cover the fractional offset. This
- * one anchors the cable at the <em>bottom</em> — at the weight, where a gap would be obvious — and
- * lets the topmost segment overshoot into the battery's own casing, which hides it. So a new segment
- * appears inside the drum rather than popping into existence at the end of the cable, and one model
- * covers every offset.
+ * <p>Where the cable's pieces go is {@link CableGeometry}, not this class: those rules are the ones a
+ * rendering bug hides in, and out there a GameTest can reach them.
  */
 public class GravityBatteryRenderer extends SafeBlockEntityRenderer<GravityBatteryBlockEntity> {
 
@@ -80,8 +77,9 @@ public class GravityBatteryRenderer extends SafeBlockEntityRenderer<GravityBatte
 		float offset = renderedOffset(be, partialTicks);
 
 		renderAt(level, CachedBuffers.partial(GBPartials.HOOK, state), offset, pos, ms, vb);
-		for (int i = 0; i < Mth.ceil(offset); i++)
-			renderAt(level, CachedBuffers.partial(GBPartials.CABLE, state), offset - i, pos, ms, vb);
+		for (int i = 0; i < CableGeometry.segments(offset); i++)
+			renderAt(level, CachedBuffers.partial(GBPartials.CABLE, state),
+				CableGeometry.segmentOffset(offset, i), pos, ms, vb);
 	}
 
 	/**
@@ -108,7 +106,7 @@ public class GravityBatteryRenderer extends SafeBlockEntityRenderer<GravityBatte
 
 	private static void renderAt(Level level, SuperByteBuffer partial, float offset, BlockPos batteryPos,
 		PoseStack ms, VertexConsumer buffer) {
-		BlockPos litFrom = batteryPos.below((int) offset);
+		BlockPos litFrom = CableGeometry.lightSource(batteryPos, offset);
 		int light = LevelRenderer.getLightColor((BlockAndTintGetter) level, level.getBlockState(litFrom),
 			litFrom);
 		partial.translate(0, -offset, 0)
