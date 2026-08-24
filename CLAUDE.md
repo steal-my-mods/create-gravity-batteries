@@ -166,6 +166,14 @@ mappings, so the output uses the same names the code here compiles against.
   each one lifted the weight by up to a block without paying a Stress Unit. Flicking the drive on and
   off was a charging strategy. `onSpeedChanged` is overridden to put the offset back, and
   `losingTheDriveDoesNotMoveTheWeight` is the lock. Do not "simplify" the override away.
+- **`hasAnalogOutputSignal` is only half of a comparator output.** Nothing polls it: a block has to
+  call `level.updateNeighbourForOutputSignal` when the value moves, which `refreshComparator` does once
+  per changed step. Without it the reading a comparator latched when it was placed never changed again
+  — the feature looked present, the README said it worked, and it reported a stale number for ever.
+  `aComparatorFollowsTheCharge` asserts the reading *rises*, not merely that it is non-zero, because
+  non-zero passes on the broken version. Note `ComparatorBlock#getInputSignal` reads
+  `pos.relative(FACING)`, so FACING points *at* what is being measured — the first version of that test
+  had the comparator the wrong way round and failed for a reason that had nothing to do with the bug.
 - **The block needs `noOcclusion()`, and not for decoration.** A block entity renderer is handed the
   light level at the block's own position, and inside a full-cube occluder that is zero — which drew
   the spinning shaft through the middle of the battery almost black. The model is a frame with an open

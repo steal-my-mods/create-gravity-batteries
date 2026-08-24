@@ -32,6 +32,9 @@ that was running at the time:
   truncates to a whole block instead of snapping to a sixteenth, and `signum(0) == 0` makes "stopped"
   count as a sign change. Since a battery's offset is its charge, flicking the drive on and off was a
   way to charge it for nothing.
+- The comparator output never updated. Declaring `hasAnalogOutputSignal` is only half of an analog
+  output — nothing polls it — so the reading a comparator latched when it was placed stayed there for
+  ever. It now follows the charge.
 - The overlay quoted a Stress figure while winding up and nothing at all while letting down.
   `LinearActuatorBlockEntity` is not a `GeneratingKineticBlockEntity`, so the inherited overlay only
   ever reported stress impact; the generator half had to be transcribed too.

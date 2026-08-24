@@ -32,6 +32,8 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.ComparatorBlockEntity;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.Property;
 import net.neoforged.neoforge.gametest.GameTestHolder;
@@ -367,6 +369,57 @@ public class GBGameTests {
 			helper.assertBlockPresent(Blocks.SLIME_BLOCK, new BlockPos(3, HIGH_TOP, 5));
 			helper.succeed();
 		});
+	}
+
+	// --- redstone ----------------------------------------------------------------------------------
+
+	/**
+	 * A comparator must both read the charge and keep up with it.
+	 *
+	 * <p>Declaring {@code hasAnalogOutputSignal} is only half of an analog output: nothing polls it, so
+	 * without {@code updateNeighbourForOutputSignal} the value a comparator latched when it was placed
+	 * never changed again. That is the worst kind of broken — the feature looks present, the README says
+	 * it works, and it silently reports a stale number for ever. So this asserts the reading is both
+	 * non-zero and <em>rising</em> while the battery winds up.
+	 */
+	@GameTest(template = "test_rig", timeoutTicks = 400)
+	public static void aComparatorFollowsTheCharge(GameTestHelper helper) {
+		rig(helper);
+		hangWeight(helper, 3, HIGH_TOP);
+		activate(helper, BATTERY_A);
+		drive(helper);
+
+		// ComparatorBlock#getInputSignal reads pos.relative(FACING), so FACING points *at* what is
+		// being measured -- which is why placing one has you face the container. The comparator also
+		// needs something solid underneath or the first block update pops it off.
+		BlockPos comparator = new BlockPos(3, SHAFT_Y, 4);
+		helper.setBlock(comparator.below(), Blocks.STONE);
+		helper.setBlock(comparator, Blocks.COMPARATOR.defaultBlockState()
+			.setValue(BlockStateProperties.HORIZONTAL_FACING, Direction.SOUTH));
+
+		int[] first = new int[1];
+		helper.runAfterDelay(40, () -> {
+			first[0] = comparatorOutput(helper, comparator);
+			helper.assertTrue(first[0] > 0,
+				"the comparator reads " + first[0] + " next to a battery holding a part-charged weight");
+			helper.assertTrue(first[0] < 15,
+				"the weight needs room to rise for this test to mean anything, reading " + first[0]);
+		});
+
+		helper.runAfterDelay(300, () -> {
+			int now = comparatorOutput(helper, comparator);
+			helper.assertTrue(now > first[0],
+				"the comparator did not follow the charge up: " + first[0] + " -> " + now);
+			helper.succeed();
+		});
+	}
+
+	private static int comparatorOutput(GameTestHelper helper, BlockPos pos) {
+		BlockEntity be = helper.getLevel()
+			.getBlockEntity(helper.absolutePos(pos));
+		if (!(be instanceof ComparatorBlockEntity comparator))
+			throw new GameTestAssertException("no comparator at " + pos + ", found " + be);
+		return comparator.getOutputSignal();
 	}
 
 	// --- what the goggles report ------------------------------------------------------------------

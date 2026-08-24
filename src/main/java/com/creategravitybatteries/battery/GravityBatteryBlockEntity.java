@@ -122,6 +122,12 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity {
 	/** Create's own generator re-activation flag, from {@code GeneratingKineticBlockEntity}. */
 	private boolean reActivateSource;
 
+	/**
+	 * What a comparator was last told. Comparators do not poll — a block with an analog output has to
+	 * nudge its neighbours when the value moves, or the reading latches once and then goes stale.
+	 */
+	private int lastComparatorOutput;
+
 	public GravityBatteryBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
 		super(type, pos, state);
 	}
@@ -308,6 +314,24 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity {
 		BatteryMode desired = decideMode();
 		if (desired != mode)
 			setMode(desired);
+
+		refreshComparator();
+	}
+
+	/**
+	 * Tells any comparator that the charge has moved.
+	 *
+	 * <p>Declaring {@code hasAnalogOutputSignal} is only half of a comparator output: nothing polls it.
+	 * Without this the reading a comparator latched when it was placed never changed again, which made
+	 * the whole feature look like it worked and do nothing. Gated on the value so this costs at most
+	 * sixteen block updates over a battery's entire travel.
+	 */
+	private void refreshComparator() {
+		int output = getComparatorOutput();
+		if (output == lastComparatorOutput)
+			return;
+		lastComparatorOutput = output;
+		level.updateNeighbourForOutputSignal(worldPosition, getBlockState().getBlock());
 	}
 
 	private BatteryMode decideMode() {
