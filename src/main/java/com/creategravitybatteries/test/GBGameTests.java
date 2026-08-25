@@ -280,6 +280,53 @@ public class GBGameTests {
 		});
 	}
 
+	/**
+	 * Digging the floor out from under a descending weight must let it carry on down.
+	 *
+	 * <p>Reported from play, and the cause was that {@code canDescend()} compared against the drop
+	 * measured at assembly rather than asking the world. The weight stopped dead at the old limit and
+	 * reported itself spent, with an open shaft underneath it.
+	 */
+	@GameTest(template = "test_rig", timeoutTicks = 600)
+	public static void clearingTheFloorLetsTheWeightCarryOnDown(GameTestHelper helper) {
+		// A shelf for the weight to land on partway down, with the real floor further below.
+		rig(helper);
+		for (int x = 2; x <= 4; x++)
+			for (int z = 4; z <= 6; z++)
+				helper.setBlock(new BlockPos(x, 4, z), Blocks.STONE);
+		hangWeight(helper, 3, SHAFT_Y - 1);
+		activate(helper, BATTERY_A);
+
+		float[] landed = new float[1];
+		helper.runAfterDelay(SETTLE_TICKS, () -> {
+			GravityBatteryBlockEntity battery = battery(helper, BATTERY_A);
+			// The shelf's top is at y=5, so a two-tall weight comes to rest with its top at y=6.
+			helper.assertTrue(battery.getDropRange() == SHAFT_Y - 1 - 6,
+				"the shelf should have been measured at " + (SHAFT_Y - 1 - 6) + ", drop reads "
+					+ battery.getDropRange());
+		});
+
+		// Let it settle onto the shelf, then take the shelf away.
+		helper.runAfterDelay(420, () -> {
+			GravityBatteryBlockEntity battery = battery(helper, BATTERY_A);
+			landed[0] = battery.offset;
+			helper.assertTrue(!battery.canDescend(),
+				"the weight should be resting on the shelf by now, at offset " + landed[0]);
+			for (int x = 2; x <= 4; x++)
+				for (int z = 4; z <= 6; z++)
+					helper.setBlock(new BlockPos(x, 4, z), Blocks.AIR);
+		});
+
+		helper.runAfterDelay(520, () -> {
+			GravityBatteryBlockEntity battery = battery(helper, BATTERY_A);
+			helper.assertTrue(battery.getDropRange() > landed[0],
+				"the drop was not re-measured after the floor went: still " + battery.getDropRange());
+			helper.assertTrue(battery.offset > landed[0],
+				"the weight did not carry on down: " + landed[0] + " -> " + battery.offset);
+			helper.succeed();
+		});
+	}
+
 	// --- the two properties a self-deciding block has to have -------------------------------------
 
 	/**

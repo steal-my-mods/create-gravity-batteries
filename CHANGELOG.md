@@ -41,6 +41,9 @@ that was running at the time:
 - Letting go of a weight snapped it to the nearest whole block, which lifted it by up to half a block
   for nothing — chargeable by winding to just under a half and toggling. It now settles downward, so
   the snap can only ever cost a fraction rather than pay one.
+- Clearing the blocks under a descending weight left it stopped at the old limit, reporting itself
+  spent over an open shaft. The measured drop is the charge scale; whether the weight may move is now
+  asked of the block actually below it, and the measurement is re-taken when the two disagree.
 - A battery carried off by another contraption deleted the weight it was holding: the block left the
   world without going through its own removal, so the weight's entity found no controller and
   discarded itself. Batteries are now in Create's `non_movable` tag — breaking one still returns its

@@ -323,12 +323,16 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 		alignDirectionWith(getTheoreticalSpeed());
 		rememberNetworkSpeed();
 
-		// A full wind-up re-measures the drop. Nothing else notices a floor that was dug out or built
-		// up after the weight was picked up, and one probe per charge cycle is a price worth paying to
-		// keep the charge reading honest. On the tick it *arrives* at the top, not every tick it spends
-		// there: the probe walks the whole shaft, and a battery sitting fully wound would walk it for
-		// ever.
-		if (running && movedContraption != null && offset <= 0 && offsetBefore > 0)
+		// The drop is a measurement, so it has to be re-taken when the world has moved under it. Two
+		// moments, and never every tick -- the probe walks the whole shaft:
+		//
+		//   - the weight arrives at the top, which is where a charge reading is about to be quoted from
+		//     a figure that may have been measured a long time ago;
+		//   - the cached figure says the weight is at the bottom and the world says it is not, which is
+		//     exactly what digging the floor out from under a descending weight looks like. Once
+		//     re-measured the condition stops holding, so this is one probe per disagreement.
+		if (running && movedContraption != null && ((offset <= 0 && offsetBefore > 0)
+			|| (offset >= restingOffset - 1.0E-3F && canDescend())))
 			reprobeDrop();
 
 		BatteryMode desired = decideMode();
@@ -400,9 +404,37 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 		return BatteryMode.IDLE;
 	}
 
-	/** There is somewhere for the weight to go, and it is not already resting on something. */
+	/**
+	 * There is somewhere for the weight to go.
+	 *
+	 * <p>Asked of the world, not of {@link #restingOffset}. That field is a <em>measurement</em>, and a
+	 * measurement goes stale the moment someone digs: clearing the blocks under a descending weight used
+	 * to leave it stopped dead at the old limit, still reading empty, with an open shaft underneath it.
+	 * The cached figure is the charge <em>scale</em> and nothing more; permission to move is a question
+	 * about the block that is actually there.
+	 */
 	public boolean canDescend() {
-		return offset < restingOffset - 1.0E-3F && offset < getExtensionRange();
+		return offset < getExtensionRange() && !restingOnSomething();
+	}
+
+	/**
+	 * Whether the next block down would stop the weight, through Create's own collision test.
+	 *
+	 * <p>One step rather than the whole shaft, so this is cheap enough to ask every tick — the walk in
+	 * {@link #probeDrop} is what measures the drop, and that still runs only when the answer it gave has
+	 * been shown to be wrong.
+	 *
+	 * <p>At a fractional offset the discrete test can be a shade permissive, because the weight already
+	 * overlaps the next cell down. That is harmless: {@code moveAndCollideContraption} does continuous
+	 * collision every tick and {@link #collided()} is what actually lands the weight and snaps it to the
+	 * grid, at which point this test agrees with it exactly.
+	 */
+	private boolean restingOnSomething() {
+		if (movedContraption == null
+			|| !(movedContraption.getContraption() instanceof GravityBatteryContraption contraption))
+			return true;
+		return ContraptionCollider.isCollidingWithWorld(level, contraption,
+			worldPosition.below((int) offset + 2), Direction.DOWN);
 	}
 
 	public boolean canAscend() {

@@ -92,8 +92,9 @@ mappings, so the output uses the same names the code here compiles against.
   battery that did that would empty itself every time the factory came back online. A battery's charge
   *is* where the weight is, so it has to keep hold of it.
 - **The drop is probed, not assumed.** `probeDrop` walks `ContraptionCollider.isCollidingWithWorld`
-  down the shaft once at assembly and that figure is the battery's capacity. Without it the charge
-  readout is `offset / maxCableLength`, which calls a weight resting on the floor 90% charged.
+  down the shaft at assembly and that figure is the battery's capacity — its charge scale, not its
+  permission to move. Without it the charge readout is `offset / maxCableLength`, which calls a weight
+  resting on the floor 90% charged.
   `theDropIsMeasuredRatherThanAssumed` fails on a build that returns the config value instead.
 - **A weight may not contain machinery, and that is a rule, not a limitation.** Create's actors —
   drills, saws, harvesters, deployers, portable interfaces — *stall* a contraption while they work,
@@ -129,9 +130,20 @@ mappings, so the output uses the same names the code here compiles against.
   on the floor supplying stress for ever — the one failure mode a gravity battery has.
   `aRestingWeightSuppliesNothing` catches a mutated `canDescend`; it also passes with the probe
   removed, because `collided()` catches it a few ticks later. Two guards, deliberately.
-- **`reprobeDrop` runs on the tick the weight *arrives* at the top, not every tick it spends there.**
-  The probe walks the whole shaft. The first version fired on `offset <= 0` and walked it every tick —
-  and crashed on the first GameTest run, because `running` can be true for a tick with
+- **`canDescend()` asks the world, and `restingOffset` is only the charge scale.** They were the same
+  thing once — `offset < restingOffset` — and that made the cached measurement load-bearing for
+  movement. Clearing the blocks under a descending weight left it stopped dead at the old limit,
+  reporting itself spent, over an open shaft; reported from play, and `restingOnSomething()` is the
+  answer: a one-step `isCollidingWithWorld` against the block actually below. Cheap enough per tick,
+  because the *walk* still only runs when the cached figure has been shown to be wrong.
+  `clearingTheFloorLetsTheWeightCarryOnDown` fails on the old comparison.
+- **`reprobeDrop` runs at the two moments the measurement is known to be stale, and never per tick.**
+  The weight arriving at the top, where a charge reading is about to be quoted from a possibly ancient
+  figure; and the cached drop claiming the weight is at the bottom while `canDescend()` says otherwise,
+  which is what digging out the floor looks like. Re-measuring makes that second condition stop
+  holding, so it is one probe per disagreement rather than one per tick — and the probe walks the whole
+  shaft, so that distinction matters. The first version fired on `offset <= 0` alone and walked it every
+  tick, and crashed on the first GameTest run, because `running` can be true for a tick with
   `movedContraption` still null.
 - **`chargeImpactPerRpm()` is one method because it was two.** `decideMode` reads it through
   `getChargeDraw()` and the network reads it through `calculateStressApplied()`. Written twice they can
