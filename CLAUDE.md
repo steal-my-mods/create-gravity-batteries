@@ -111,6 +111,12 @@ mappings, so the output uses the same names the code here compiles against.
   understanding that the actor will deal with it. Measured on the second attempt: a weight ten blocks
   down with all six blocks it "cut" still standing. **Do not reach for this again** without a way to
   keep the declared speed constant.
+- **Allowing actors aboard but making them inert is the worst of the three, and it is ruled out rather
+  than merely costly.** `ContraptionCollider.isCollidingWithWorld` grants its exemption because the
+  *block* has a block-breaking behaviour, not because that behaviour is active — the exemption is a
+  promise that the actor will clear the way. Strip the actors and you keep the benefit and drop the
+  promise. Measured: a weight with a stripped-actor drill fell its full ten blocks with all six
+  deepslate still standing.
 - **A drill also made the drop probe read straight through breakable blocks**, so a drilling weight
   advertised a drop it could only cover at drilling speed — far slower than the descent rate the
   duration arithmetic assumes. Moot now that actors are refused, and one more reason they are.

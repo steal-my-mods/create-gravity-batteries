@@ -63,6 +63,13 @@ public class GravityBatteryContraption extends TranslatingContraption {
 	 * test exempts whatever a block-breaking actor could break. Measured: a weight ten blocks down with
 	 * all six blocks it "cut" still standing.
 	 *
+	 * <p>Letting actors aboard but making them inert is worse still, and for a reason that rules the
+	 * idea out rather than merely costing something: {@code ContraptionCollider.isCollidingWithWorld}
+	 * grants its exemption on the strength of the <em>block</em> having a block-breaking behaviour, not
+	 * on that behaviour being active. The exemption is a promise that the actor will clear the way, so
+	 * an inert drill keeps the promise's benefit and drops the promise. Measured: a weight with a
+	 * stripped-actor drill fell its full ten blocks with all six deepslate still standing.
+	 *
 	 * <p>So the rule is that a battery hangs a weight, not a machine. Create already has the block for
 	 * cutting a shaft with drills on it, and it is the Rope Pulley: cut the shaft first, then install
 	 * the battery in it. Two blocks, two jobs, and the reason each one is good at its job.

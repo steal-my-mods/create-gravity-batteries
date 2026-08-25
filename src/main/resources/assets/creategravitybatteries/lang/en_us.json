@@ -10,7 +10,7 @@
   "block.creategravitybatteries.gravity_battery.tooltip.behaviour3": "Lets the weight _down_ and supplies the missing capacity, until the weight runs into something.",
   "block.creategravitybatteries.gravity_battery.tooltip.condition4": "Sizing one",
   "block.creategravitybatteries.gravity_battery.tooltip.behaviour4": "The _weight_ is how much power it supplies. The _drop_ is how long it lasts.",
-  "creategravitybatteries.assembly.no_actors": "A Gravity Battery hangs a weight, not a machine, so %1$s cannot be part of one.\\nCut the shaft with a Rope Pulley first, then install the battery in it.",
+  "creategravitybatteries.assembly.no_actors": "%1$s cannot be part of a battery’s weight\nCut the shaft with a Rope Pulley first",
   "creategravitybatteries.tooltip.gravity_battery.status": "Gravity Battery: %1$s",
   "creategravitybatteries.tooltip.gravity_battery.mode.idle": "Holding",
   "creategravitybatteries.tooltip.gravity_battery.mode.charging": "Winding up",
