@@ -223,6 +223,23 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 	}
 
 	/**
+	 * Whether an actor on the weight is mid-job, which is Create's "stalled" and freezes the offset.
+	 *
+	 * <p><b>Reporting only.</b> Nothing branches on this, and two attempts to make something branch on
+	 * it both broke drilling badly enough to be worse than the problem — see the Known gaps note in
+	 * CLAUDE.md. The short version: a jammed weight is not descending and so is not earning the capacity
+	 * it supplies, but every way of withholding that capacity ends up moving the mode, a mode change
+	 * moves {@link #getGeneratedSpeed()}, and {@code LinearActuatorBlockEntity#onSpeedChanged} calls
+	 * {@code Contraption.stop} on a sign change — which resets the actors, throws away the drill's
+	 * progress, and clears the stall that was holding the weight against the block. The contraption then
+	 * walks straight through it, because Create's collision test exempts anything a block-breaking actor
+	 * could break. Measured: six blocks intact, weight ten below them.
+	 */
+	public boolean isJammed() {
+		return movedContraption != null && movedContraption.isStalled();
+	}
+
+	/**
 	 * What this battery is currently contributing to the network's totals — the values the network
 	 * actually has recorded for it, not fresh calculations, so subtracting them leaves exactly what
 	 * everything else is doing.
@@ -348,9 +365,6 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 		// battery that kept its mode would supply its full rating with the weight motionless, for as
 		// long as the drill took. Which is for ever, if it is on something it cannot get through.
 		// Capacity is only ever paid for by descent; no movement, no trade, in either direction.
-		if (movedContraption.isStalled())
-			return idle(IdleReason.JAMMED);
-
 		float headroom = networkCapacityWithoutSelf() - networkStressWithoutSelf();
 
 		// Nothing else on this network can turn it, and there is something attached worth turning. The
@@ -871,6 +885,11 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 				.style(modeColour())
 				.component())
 			.forGoggles(tooltip);
+
+		if (isJammed())
+			GBLang.translate(IdleReason.JAMMED.translationKey())
+				.style(ChatFormatting.DARK_GRAY)
+				.forGoggles(tooltip, 1);
 
 		if (mode == BatteryMode.IDLE && idleReason != IdleReason.NONE) {
 			GBLang.translate(idleReason.translationKey())

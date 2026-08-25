@@ -28,6 +28,12 @@ below and still have it found. That asymmetry is deliberate — a battery never 
 on its own, so rotation arriving on a shaft is not treated as permission to go looking for something
 to grab.
 
+A weight is a weight: drills, saws, harvesters and other Create machinery cannot be part of one, and a
+battery will tell you so on its own face if you try. Cut the shaft with a Rope Pulley — that is the
+block for it — and then install the battery in the shaft you cut. The reason is the energy model: a
+machine *stalls* the contraption while it works, and a battery that is paid by the tick rather than by
+the block would be earning while standing still.
+
 Mind the flush rule cuts both ways: whatever is directly under a battery is what it will pick up, so
 don't mount one straight onto a chest or a machine you meant to keep. Right-click to let go and the
 blocks return exactly where they were, so it is undoable — but it will not undo itself.

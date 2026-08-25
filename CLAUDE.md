@@ -95,25 +95,29 @@ mappings, so the output uses the same names the code here compiles against.
   down the shaft once at assembly and that figure is the battery's capacity. Without it the charge
   readout is `offset / maxCableLength`, which calls a weight resting on the floor 90% charged.
   `theDropIsMeasuredRatherThanAssumed` fails on a build that returns the config value instead.
-- **A stalled contraption is the third way a weight stops moving, and it is not a collision.** Drills
-  and saws on a weight's underside stall the contraption while they chew through a block, and Create
-  freezes the offset for as long as that lasts — `collided()` never fires and `canDescend()` is
-  perfectly true, because the weight *could* descend, it just is not. A battery that kept its mode
-  through that supplied its full rating at a dead stop: measured on a drill over obsidian,
-  `off=1.859` unchanged for 350 ticks with `cap=8` the whole time, and it never restarted.
-  `decideMode` idles on `movedContraption.isStalled()` for that reason, in either direction — no
-  movement, no trade. `aJammedWeightSuppliesNothing` is the lock.
-- **Idling on the stall is also what un-jams it.** Before the guard, a drill on obsidian hung for ever;
-  with it, the battery stands down for the stalled tick and the weight works its way down. So the
-  scenario the guard was written for cannot be reproduced any more, which is why that test asserts a
-  per-tick invariant — capacity must be zero on every stalled tick — rather than parking the weight
-  somewhere it jams permanently. It counts the stalls it saw, too, or a run where nothing stalled
-  would pass having proved nothing.
-- **A drill on the weight makes the drop probe read much deeper, and that is correct.**
-  `ContraptionCollider.isCollidingWithWorld` lets a block-breaking behaviour pass anything it
-  `canBreak`, so a drilling weight really can descend through stone. It does mean the stated drop is a
-  distance the weight can only cover at drilling speed, which is far slower than the descent rate the
-  duration arithmetic assumes — the charge reading stays honest, the time estimate does not.
+- **A weight may not contain machinery, and that is a rule, not a limitation.** Create's actors —
+  drills, saws, harvesters, deployers, portable interfaces — *stall* a contraption while they work,
+  which freezes the offset. Every number this mod quotes comes from one coupling, that time spent
+  equals height lost, and a stall breaks it: a stalled weight supplies its full rating while descending
+  nothing, so a drill parked on obsidian is a power station whose output is set by block hardness.
+  `GravityBatteryContraption.assemble` refuses one, before anything has started moving, with an
+  `AssemblyException` the block shows on its own face.
+- **Two attempts to withhold the payment instead both ended up worse than the exploit, and the reason
+  generalises.** Withholding moves the mode — directly, or through the network balance, since capacity
+  is an input to `decideMode` as well as an output of it. A mode change moves `getGeneratedSpeed`, and
+  `LinearActuatorBlockEntity#onSpeedChanged` calls `Contraption.stop` on a sign change, which resets
+  the actors and clears the stall. The stall was the only thing holding the weight against the block,
+  because `ContraptionCollider` exempts whatever a block-breaking actor *could* break on the
+  understanding that the actor will deal with it. Measured on the second attempt: a weight ten blocks
+  down with all six blocks it "cut" still standing. **Do not reach for this again** without a way to
+  keep the declared speed constant.
+- **A drill also made the drop probe read straight through breakable blocks**, so a drilling weight
+  advertised a drop it could only cover at drilling speed — far slower than the descent rate the
+  duration arithmetic assumes. Moot now that actors are refused, and one more reason they are.
+- **350 ticks of a motionless weight is not necessarily a jam.** It was a drill part-way through
+  obsidian, which takes about 2,900 ticks a block. An earlier version of this analysis called it a
+  permanent hang on the strength of a 500-tick sample and built a guard on top of that reading. If a
+  weight is not moving, measure for longer before concluding it is stuck.
 - **`canDescend()` is what refuses free energy, and `collided()` is its backstop.** Capacity is only
   supplied while the weight can actually fall. Removing either guard leaves a battery whose weight is
   on the floor supplying stress for ever — the one failure mode a gravity battery has.

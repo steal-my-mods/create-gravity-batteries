@@ -564,71 +564,59 @@ public class GBGameTests {
 		});
 	}
 
-	// --- a weight that is not moving --------------------------------------------------------------
+	// --- weights with machinery in them -----------------------------------------------------------
 
 	/**
-	 * A weight that is not moving must not be paying out.
+	 * A battery refuses a weight with an actor in it, and leaves the world alone doing so.
 	 *
-	 * <p>Drills and saws on a weight's underside stall the contraption while they chew through a block,
-	 * and Create freezes the offset for as long as that lasts. The battery kept its mode through it and
-	 * so kept supplying its full rating with the weight motionless — measured before the fix, on a drill
-	 * over obsidian: {@code off=1.859} unchanged for 350 ticks and counting, {@code cap=8} throughout.
-	 * Free energy by a route {@link GravityBatteryBlockEntity#canDescend()} cannot see, because the
-	 * weight <em>could</em> descend, it simply was not doing so.
+	 * <p>Actors — drills, saws, harvesters, deployers — stall the contraption while they work, and a
+	 * stall freezes the offset. The energy model rests on time spent equalling height lost, so a stalled
+	 * weight supplies its full rating while descending nothing: a drill parked on obsidian is a power
+	 * station whose output is set by block hardness. Two attempts to withhold that payment instead both
+	 * broke drilling far worse than the exploit they closed, because withholding moves the mode, a mode
+	 * change moves the generated speed, and Create's actuator stops the contraption's actors on a sign
+	 * change — clearing the stall that was the only thing holding the weight against the block.
+	 * Measured: a weight ten blocks down with all six blocks it "cut" still standing.
 	 *
-	 * <p>Asserted as a per-tick invariant rather than by parking the weight somewhere it jams for ever,
-	 * because the fix removed that state: idling for the stalled tick is what lets the drill get on with
-	 * the block, so the weight now works its way down instead of hanging. The stalls are brief and
-	 * frequent, and the rule is that not one of them may be paid for. The number of stalls seen is
-	 * asserted too, or a run in which nothing ever stalled would pass while proving nothing.
-	 *
-	 * <p>Note the drop is measured straight through the obsidian: Create's collision test lets a drill
-	 * pass anything it can break, so a drilling weight really can descend that far. That part is right.
+	 * <p>Refusing it outright is the rule that has no such tail. Create's block for cutting a shaft with
+	 * drills is the Rope Pulley.
 	 */
-	@GameTest(template = "test_rig", timeoutTicks = 700)
-	public static void aJammedWeightSuppliesNothing(GameTestHelper helper) {
-		floor(helper);
-		placeBattery(helper, BATTERY_A);
-		helper.setBlock(SHAFT, AllBlocks.SHAFT.getDefaultState()
-			.setValue(BlockStateProperties.AXIS, Direction.Axis.X));
-
-		// A slime weight with a drill on its underside, hung flush, over a column of obsidian.
-		helper.setBlock(new BlockPos(3, SHAFT_Y - 1, 5), Blocks.SLIME_BLOCK);
-		helper.setBlock(new BlockPos(3, SHAFT_Y - 2, 5), AllBlocks.MECHANICAL_DRILL.getDefaultState()
+	@GameTest(template = "test_rig", timeoutTicks = 200)
+	public static void aWeightMayNotContainMachinery(GameTestHelper helper) {
+		rig(helper);
+		BlockPos slime = new BlockPos(3, SHAFT_Y - 1, 5);
+		BlockPos drill = new BlockPos(3, SHAFT_Y - 2, 5);
+		helper.setBlock(slime, Blocks.SLIME_BLOCK);
+		helper.setBlock(drill, AllBlocks.MECHANICAL_DRILL.getDefaultState()
 			.setValue(BlockStateProperties.FACING, Direction.DOWN));
-		for (int y = 1; y <= 6; y++)
-			helper.setBlock(new BlockPos(3, y, 5), Blocks.OBSIDIAN);
+		activate(helper, BATTERY_A);
+		drive(helper);
+
+		helper.runAfterDelay(SETTLE_TICKS + 20, () -> {
+			GravityBatteryBlockEntity battery = battery(helper, BATTERY_A);
+			helper.assertTrue(!battery.running,
+				"the battery took hold of a weight with a drill in it");
+			helper.assertTrue(battery.getLastAssemblyException() != null,
+				"...and it should say why, on the block; it reported nothing");
+			// Refused before anything started moving, so the weight is still standing in the world.
+			helper.assertBlockPresent(Blocks.SLIME_BLOCK, slime);
+			helper.assertBlockPresent(AllBlocks.MECHANICAL_DRILL.get(), drill);
+			helper.succeed();
+		});
+	}
+
+	/** ...while a weight of plain blocks is still taken, so the rule is not simply refusing everything. */
+	@GameTest(template = "test_rig", timeoutTicks = 200)
+	public static void aWeightOfPlainBlocksIsStillTaken(GameTestHelper helper) {
+		rig(helper);
+		hangWeight(helper, 3, SHAFT_Y - 1);
 		activate(helper, BATTERY_A);
 
-		int[] stalledTicks = new int[1];
-		int[] stalledAndPaid = new int[1];
-		List<String> paidWhileStalled = new ArrayList<>();
-		for (int tick = 30; tick <= 600; tick++) {
-			int at = tick;
-			helper.runAfterDelay(at, () -> {
-				GravityBatteryBlockEntity battery = battery(helper, BATTERY_A);
-				if (battery.getAttachedContraption() == null || !battery.getAttachedContraption()
-					.isStalled())
-					return;
-				stalledTicks[0]++;
-				float capacity = battery.calculateAddedStressCapacity();
-				// Only the first few: on the behaviour this locks, every tick offends, and a failure
-				// message with 571 entries in it is not a better failure message.
-				if (capacity > 0 && paidWhileStalled.size() < 4)
-					paidWhileStalled.add("t=" + at + " offset=" + battery.offset + " cap=" + capacity);
-				else if (capacity > 0)
-					stalledAndPaid[0]++;
-			});
-		}
-
-		helper.runAfterDelay(620, () -> {
-			helper.assertTrue(stalledTicks[0] > 0,
-				"the drill never stalled once, so this test proved nothing -- the rig needs a block it "
-					+ "has to stop and chew");
-			helper.assertTrue(paidWhileStalled.isEmpty(),
-				"the battery supplied capacity with its weight stalled on "
-					+ (paidWhileStalled.size() + stalledAndPaid[0]) + " ticks, first few: "
-					+ paidWhileStalled);
+		helper.runAfterDelay(SETTLE_TICKS, () -> {
+			GravityBatteryBlockEntity battery = battery(helper, BATTERY_A);
+			helper.assertTrue(battery.running, "a plain slime weight should still be picked up");
+			helper.assertTrue(battery.getLastAssemblyException() == null,
+				"...without complaint; it says " + battery.getLastAssemblyException());
 			helper.succeed();
 		});
 	}

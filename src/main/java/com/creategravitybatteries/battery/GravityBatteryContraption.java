@@ -1,6 +1,8 @@
 package com.creategravitybatteries.battery;
 
+import com.creategravitybatteries.GBLang;
 import com.creategravitybatteries.registry.GBContraptionTypes;
+import com.simibubi.create.api.behaviour.movement.MovementBehaviour;
 import com.simibubi.create.api.contraption.ContraptionType;
 import com.simibubi.create.content.contraptions.AssemblyException;
 import com.simibubi.create.content.contraptions.TranslatingContraption;
@@ -9,6 +11,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate.StructureBlockInfo;
 
 /**
  * The hanging weight. Structurally this is Create's {@code PulleyContraption} — a translating
@@ -42,10 +45,43 @@ public class GravityBatteryContraption extends TranslatingContraption {
 		return GBContraptionTypes.GRAVITY_BATTERY.get();
 	}
 
+	/**
+	 * Refuses a weight with machinery in it, before anything has started moving.
+	 *
+	 * <p>Create calls these actors — drills, saws, harvesters, deployers, portable interfaces — and they
+	 * are a category error on a battery rather than a bug to be fixed. An actor <em>stalls</em> the
+	 * contraption while it works, which freezes the offset, and the whole energy model rests on the one
+	 * coupling that breaks: time spent equals height lost. A stalled weight supplies its full rating
+	 * while descending nothing, so a drill parked on obsidian is a power station whose output is set by
+	 * block hardness.
+	 *
+	 * <p>Two attempts to withhold that payment instead both ended up worse than the disease. Withholding
+	 * moves the mode — directly, or through the network balance, since capacity is an input to the
+	 * decision as well as an output of it — a mode change moves the generated speed, and Create's
+	 * actuator calls {@code Contraption.stop} on a sign change, which resets the actors and clears the
+	 * stall. With the stall gone nothing holds the weight against the block, because Create's collision
+	 * test exempts whatever a block-breaking actor could break. Measured: a weight ten blocks down with
+	 * all six blocks it "cut" still standing.
+	 *
+	 * <p>So the rule is that a battery hangs a weight, not a machine. Create already has the block for
+	 * cutting a shaft with drills on it, and it is the Rope Pulley: cut the shaft first, then install
+	 * the battery in it. Two blocks, two jobs, and the reason each one is good at its job.
+	 */
 	@Override
 	public boolean assemble(Level world, BlockPos pos) throws AssemblyException {
 		if (!searchMovedStructure(world, pos, null))
 			return false;
+
+		for (StructureBlockInfo info : getBlocks().values()) {
+			if (MovementBehaviour.REGISTRY.get(info.state()) == null)
+				continue;
+			throw new AssemblyException(GBLang
+				.translate("assembly.no_actors", info.state()
+					.getBlock()
+					.getName())
+				.component());
+		}
+
 		startMoving(world);
 		return true;
 	}
