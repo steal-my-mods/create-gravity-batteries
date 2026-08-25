@@ -593,7 +593,7 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 		if (!running && movedContraption == null)
 			return;
 
-		offset = getGridOffset(offset);
+		offset = settledOffset();
 		if (movedContraption != null) {
 			resetContraptionToOffset();
 			if (!level.isClientSide)
@@ -641,6 +641,28 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 			return;
 		offset = keep;
 		resetContraptionToOffset();
+	}
+
+	/**
+	 * Where a weight settles when it is put back into the world: onto the grid <em>downward</em>, never
+	 * up.
+	 *
+	 * <p>Create's {@code getGridOffset} rounds to nearest, and for this block that is free charge.
+	 * Offset is measured downward, so rounding it <em>down</em> lifts the weight — up to half a block
+	 * of height that nobody paid a Stress Unit for, claimable by letting it charge to just under a
+	 * half and toggling. It is the same defect as the offset truncation in {@code onSpeedChanged},
+	 * arriving by a different route.
+	 *
+	 * <p>Rounding the offset up settles the weight down, which can only ever lose a fraction of a
+	 * block. Losses are fine here and gains are not — the same asymmetry that puts the whole round-trip
+	 * loss on the way up.
+	 *
+	 * <p>It cannot settle a weight into the floor: {@link #restingOffset} is always a whole number, and
+	 * {@link #canDescend()} keeps the offset below it, so the value this rounds up to is at worst the
+	 * resting offset itself.
+	 */
+	private int settledOffset() {
+		return Mth.clamp(Mth.ceil(offset), 0, getExtensionRange());
 	}
 
 	/**

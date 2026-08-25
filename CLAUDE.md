@@ -262,6 +262,15 @@ mappings, so the output uses the same names the code here compiles against.
   non-zero passes on the broken version. Note `ComparatorBlock#getInputSignal` reads
   `pos.relative(FACING)`, so FACING points *at* what is being measured — the first version of that test
   had the comparator the wrong way round and failed for a reason that had nothing to do with the bug.
+- **Letting go settles the weight *downwards*, and "down" is `ceil` because offset is measured
+  downward.** `getGridOffset` rounds to nearest, which for this block is free charge: rounding the
+  offset down lifts the weight, so charging to just under a half and toggling banks height nobody paid
+  a Stress Unit for. Rounding the offset *up* settles it down, which can only lose a fraction. Same
+  asymmetry as the round-trip loss going on the way up — losses are fine, gains are not. Note `floor`
+  is the wrong answer despite sounding like the safe one; it is `floor` of the *height* that is wanted,
+  and that is `ceil` of the offset. `lettingGoSettlesTheWeightDownwards` fails on round *and* on floor.
+  It cannot settle a weight into the floor: `restingOffset` is always whole and `canDescend()` keeps the
+  offset under it.
 - **The block needs `noOcclusion()`, and not for decoration.** A block entity renderer is handed the
   light level at the block's own position, and inside a full-cube occluder that is zero — which drew
   the spinning shaft through the middle of the battery almost black. The model is a frame with an open

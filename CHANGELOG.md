@@ -38,6 +38,9 @@ that was running at the time:
   contraption while they work, which freezes it in place, and a battery paid by the tick rather than by
   the block would earn its full rating standing still. A battery now refuses such a weight and says so
   on its own face; cut the shaft with a Rope Pulley first, which is the block for it.
+- Letting go of a weight snapped it to the nearest whole block, which lifted it by up to half a block
+  for nothing — chargeable by winding to just under a half and toggling. It now settles downward, so
+  the snap can only ever cost a fraction rather than pay one.
 - A battery carried off by another contraption deleted the weight it was holding: the block left the
   world without going through its own removal, so the weight's entity found no controller and
   discarded itself. Batteries are now in Create's `non_movable` tag — breaking one still returns its

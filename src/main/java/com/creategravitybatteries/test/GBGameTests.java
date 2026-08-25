@@ -38,6 +38,7 @@ import net.minecraft.nbt.NbtAccounter;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.Mth;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.block.Blocks;
@@ -367,17 +368,31 @@ public class GBGameTests {
 
 	// --- letting go -------------------------------------------------------------------------------
 
+	/**
+	 * A second activation gives the weight back as blocks, at the grid position it had settled to.
+	 *
+	 * <p>Not necessarily where it was picked up from: with no motor on the shaft this battery starts
+	 * letting the weight down immediately, and blocks land on whole coordinates, so a weight that has
+	 * descended a fraction settles to the next position <em>down</em>. That direction is deliberate —
+	 * see {@code lettingGoSettlesTheWeightDownwards} — so the expected position is computed from where
+	 * the weight actually was rather than assumed to be the starting one.
+	 */
 	@GameTest(template = "test_rig", timeoutTicks = 300)
 	public static void activatingAgainPutsTheWeightBack(GameTestHelper helper) {
 		rig(helper);
 		hangWeight(helper, 3, HIGH_TOP);
 		activate(helper, BATTERY_A);
 
-		helper.runAfterDelay(SETTLE_TICKS, () -> activate(helper, BATTERY_A));
+		float[] before = new float[1];
+		helper.runAfterDelay(SETTLE_TICKS, () -> {
+			before[0] = battery(helper, BATTERY_A).offset;
+			activate(helper, BATTERY_A);
+		});
 		helper.runAfterDelay(SETTLE_TICKS + 10, () -> {
 			GravityBatteryBlockEntity battery = battery(helper, BATTERY_A);
 			helper.assertTrue(!battery.running, "the battery should have let go");
-			helper.assertBlockPresent(Blocks.SLIME_BLOCK, new BlockPos(3, HIGH_TOP, 5));
+			helper.assertBlockPresent(Blocks.SLIME_BLOCK,
+				new BlockPos(3, SHAFT_Y - 1 - Mth.ceil(before[0]), 5));
 			helper.succeed();
 		});
 	}
@@ -646,6 +661,45 @@ public class GBGameTests {
 				absolute),
 			"a contraption is allowed to carry the battery off, which deletes the weight it was holding");
 		helper.succeed();
+	}
+
+	/**
+	 * Letting go must never lift the weight.
+	 *
+	 * <p>Create's {@code getGridOffset} rounds to nearest, and offset is measured downward — so rounding
+	 * it down lifts the weight by up to half a block, free. Charge to just under a half, toggle, repeat.
+	 * Settling downward instead can only lose a fraction, which is the safe direction.
+	 *
+	 * <p>The toggle has to happen at a fractional offset whose two roundings differ, or the test proves
+	 * nothing; that is asserted before it fires.
+	 */
+	@GameTest(template = "test_rig", timeoutTicks = 400)
+	public static void lettingGoSettlesTheWeightDownwards(GameTestHelper helper) {
+		rig(helper);
+		hangWeight(helper, 3, HIGH_TOP);
+		activate(helper, BATTERY_A);
+		drive(helper);
+
+		// Long enough to have wound up past a whole block, landing on a fraction below a half.
+		float[] before = new float[1];
+		helper.runAfterDelay(200, () -> {
+			GravityBatteryBlockEntity battery = battery(helper, BATTERY_A);
+			before[0] = battery.offset;
+			float fraction = before[0] - (int) before[0];
+			helper.assertTrue(fraction > 0.05F && fraction < 0.45F,
+				"this test needs an offset whose ceil and round differ, the weight is at " + before[0]);
+			activate(helper, BATTERY_A);
+		});
+
+		helper.runAfterDelay(215, () -> {
+			// The weight's top block sits at batteryY - 1 - offset.
+			int settled = Mth.ceil(before[0]);
+			int lifted = Math.round(before[0]);
+			helper.assertTrue(settled != lifted, "the roundings agree, so this asserts nothing");
+			helper.assertBlockPresent(Blocks.SLIME_BLOCK, new BlockPos(3, SHAFT_Y - 1 - settled, 5));
+			helper.assertBlockPresent(Blocks.AIR, new BlockPos(3, SHAFT_Y - 1 - lifted, 5));
+			helper.succeed();
+		});
 	}
 
 	// --- Threshold Switch and Display Link ---------------------------------------------------------
