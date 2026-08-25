@@ -322,6 +322,7 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 
 		alignDirectionWith(getTheoreticalSpeed());
 		rememberNetworkSpeed();
+		reassertRotationIfItWasTakenAway();
 
 		// The drop is a measurement, so it has to be re-taken when the world has moved under it. Two
 		// moments, and never every tick -- the probe walks the whole shaft:
@@ -356,6 +357,33 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 			return;
 		lastComparatorOutput = output;
 		level.updateNeighbourForOutputSignal(worldPosition, getBlockState().getBlock());
+	}
+
+	/**
+	 * Puts the battery's rotation back if something took it away without telling it.
+	 *
+	 * <p>Create re-arms a generator that has been detached by setting {@code reActivateSource}, and
+	 * several places decide whether to do that by testing {@code instanceof
+	 * GeneratingKineticBlockEntity}. {@link com.simibubi.create.content.kinetics.base.KineticBlockEntity#switchToBlockState}
+	 * is one of them, and it is the path a <em>wrench</em> goes through — so wrench-rotating a battery
+	 * that was carrying the network left it in DISCHARGING at speed zero for ever. The weight stopped,
+	 * the shaft died, and nothing was logged.
+	 *
+	 * <p>Asking the question directly rather than mirroring the flag: that covers the wrench and every
+	 * other place Create does the same {@code instanceof} test, of which there is no reason to think the
+	 * wrench is the last. Self-limiting, because {@code updateGeneratedRotation} is what makes the
+	 * condition stop holding.
+	 *
+	 * <p>{@code getTheoreticalSpeed()}, not {@code getSpeed()}: an overstressed network reads zero
+	 * through {@code getSpeed()} while the battery is still perfectly well attached, and re-asserting
+	 * there would fight the stall rather than fix anything.
+	 */
+	private void reassertRotationIfItWasTakenAway() {
+		if (mode != BatteryMode.DISCHARGING || hasSource())
+			return;
+		if (getTheoreticalSpeed() != 0 || getGeneratedSpeed() == 0)
+			return;
+		updateGeneratedRotation();
 	}
 
 	private BatteryMode decideMode() {

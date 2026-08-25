@@ -529,6 +529,53 @@ has not happened. What the audit established:
   — but it is the one cost that scales with battery count, and worth measuring before tuning.
 - **No static mutable state**, so nothing leaks between players or worlds.
 
+## The Create interaction audit
+
+Every surprise so far arrived through a contract this block inherits but is not quite an instance of.
+So this is organised by *mechanism*, not by block: check the mechanism once and every block that uses
+it is covered. Done by reading Create 6.0.11's own code for each one.
+
+**Rotation and stress.** Shafts, cogwheels, gearboxes, chain drives and belts are inert — a battery is
+an ordinary network member and, while discharging, an ordinary source. Other generators (creative
+motor, water wheel, windmill, steam engine, hand crank) are fine and are in fact what `rememberedSpeed`
+is for. A **Rotation Speed Controller** driving a battery is an ordinary consumer relationship, and the
+target speed it imposes is picked up as the remembered speed, which the discharge cap then honours.
+Stressometer and Speedometer are read-only.
+
+**Gearshift and Clutch** were the case worth checking, because `applyNewSpeed` really does
+`level.destroyBlock` on a generator whose rotation opposes a stronger network — that is how Create
+punishes two motors fighting. `alignDirectionWith` is what stops it, and
+`reversingTheNetworkDoesNotDestroyTheBattery` flips a Gearshift back and forth four times to prove it.
+The **Sequenced Gearshift** is the one that needed code: see the note above.
+
+**The wrench needed code too, and it is the clearest example of the pattern.** `IRotate extends
+IWrenchable`, so a battery is wrenchable like every Create kinetic block, and rotating one goes through
+`KineticBlockEntity.switchToBlockState` — which detaches the kinetics and then re-arms the source with
+`if (be instanceof GeneratingKineticBlockEntity) be.reActivateSource = true`. This block is not one, so
+it was never re-armed: a wrenched battery that had been carrying the network sat in DISCHARGING at
+speed zero for ever, weight stopped, shaft dead, nothing logged. `reassertRotationIfItWasTakenAway`
+asks the question directly instead of mirroring the flag, so it covers the wrench and anything else
+Create tests the same way. Sneak-wrenching is a plain `destroyBlock`, which reaches `remove()` and
+therefore `disassemble()`, so the weight comes back like it does for a pickaxe.
+
+**Contraptions.** Carrying the battery is refused (`non_movable`, above). Actors inside the weight are
+refused at assembly (above). Super glue, chassis and slime/honey are the intended way to hold a weight
+together. Another contraption sharing the shaft is Create's collider's problem and it handles it.
+
+**Redstone.** Comparator, Threshold Switch and Display Link each carry one thing and each has a test.
+The battery deliberately has no redstone *input*, which is also true of the Rope Pulley.
+
+**Cleared without needing anything.** `SAFE_NBT` has no consumer anywhere in Create 6 — not even as a
+literal — so the block's absence from that tag means nothing. A Deployer right-clicking a battery
+toggles its weight, which works and is arguably useful. The recipe's `c:plates/iron` resolves to
+`create:iron_sheet`.
+
+**Discoverability is a separate job from working, and it fails silently.** Implementing
+`ThresholdSwitchObservable` and registering the display sources makes those things work; being in
+Create's Ponder index is what makes them findable, and nothing complains if you are not. `registerTags`
+joins four of Create's own pages — kinetic sources, movement anchor, threshold switch targets, display
+sources — each of which is a claim the block actually makes.
+
 ## Known gaps
 
 - **The item model is the block model.** It shows the casing and the spool but no shaft, because the

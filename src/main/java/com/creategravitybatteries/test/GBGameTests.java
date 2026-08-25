@@ -19,6 +19,7 @@ import com.simibubi.create.AllBlocks;
 import com.simibubi.create.api.behaviour.display.DisplaySource;
 import com.simibubi.create.api.contraption.BlockMovementChecks;
 import com.simibubi.create.content.kinetics.base.HorizontalAxisKineticBlock;
+import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import com.simibubi.create.content.kinetics.transmission.sequencer.SequencedGearshiftBlockEntity.SequenceContext;
 import com.simibubi.create.content.kinetics.transmission.sequencer.SequencerInstructions;
 import com.simibubi.create.content.redstone.displayLink.DisplayLinkContext;
@@ -784,6 +785,93 @@ public class GBGameTests {
 			helper.assertTrue(settled != lifted, "the roundings agree, so this asserts nothing");
 			helper.assertBlockPresent(Blocks.SLIME_BLOCK, new BlockPos(3, SHAFT_Y - 1 - settled, 5));
 			helper.assertBlockPresent(Blocks.AIR, new BlockPos(3, SHAFT_Y - 1 - lifted, 5));
+			helper.succeed();
+		});
+	}
+
+	// --- reversal and interruption ------------------------------------------------------------------
+
+	/**
+	 * A Gearshift reversing the network must not destroy the battery.
+	 *
+	 * <p>Create's {@code applyNewSpeed} destroys a generator whose rotation opposes a network stronger
+	 * than itself — that is how it punishes two motors fighting each other, and it is a real
+	 * {@code level.destroyBlock} on the block. A battery declares a direction of its own, so a
+	 * Gearshift between it and the rest of the network is exactly the arrangement that could trip it.
+	 * {@code alignDirectionWith} is what prevents it, by flipping to agree with a shaft that is already
+	 * turning rather than insisting.
+	 */
+	@GameTest(template = "test_rig", timeoutTicks = 400)
+	public static void reversingTheNetworkDoesNotDestroyTheBattery(GameTestHelper helper) {
+		floor(helper);
+		placeBattery(helper, BATTERY_A);
+		// motor -> gearshift -> battery, so flipping the gearshift reverses what reaches the battery.
+		BlockPos gearshift = new BlockPos(2, SHAFT_Y, 5);
+		helper.setBlock(gearshift, AllBlocks.GEARSHIFT.getDefaultState()
+			.setValue(BlockStateProperties.AXIS, Direction.Axis.X));
+		helper.setBlock(new BlockPos(1, SHAFT_Y, 5), AllBlocks.CREATIVE_MOTOR.getDefaultState()
+			.setValue(BlockStateProperties.FACING, Direction.EAST));
+		helper.setBlock(SHAFT, AllBlocks.SHAFT.getDefaultState()
+			.setValue(BlockStateProperties.AXIS, Direction.Axis.X));
+		hangWeight(helper, 3, HIGH_TOP);
+		activate(helper, BATTERY_A);
+
+		// Flip it back and forth; each flip is a sign change at the battery.
+		for (int at : new int[] { 60, 110, 160, 210 }) {
+			helper.runAfterDelay(at, () -> helper.setBlock(gearshift, helper.getBlockState(gearshift)
+				.cycle(BlockStateProperties.POWERED)));
+		}
+
+		helper.runAfterDelay(260, () -> {
+			helper.assertBlockPresent(GBBlocks.GRAVITY_BATTERY.get(), BATTERY_A);
+			GravityBatteryBlockEntity battery = battery(helper, BATTERY_A);
+			helper.assertTrue(battery.running, "the battery let go of its weight during the reversals");
+			helper.succeed();
+		});
+	}
+
+	// --- the wrench -------------------------------------------------------------------------------
+
+	/**
+	 * A wrench-rotated battery must go back to driving the shaft.
+	 *
+	 * <p>{@code IRotate extends IWrenchable}, so a battery is wrenchable like every Create kinetic
+	 * block, and {@code IWrenchable.onWrenched} routes through
+	 * {@code KineticBlockEntity.switchToBlockState} — which detaches the kinetics for a state that is
+	 * not kinetically equivalent and then re-arms the source with
+	 * {@code if (be instanceof GeneratingKineticBlockEntity) be.reActivateSource = true}. This block is
+	 * not one, so it never got re-armed: a battery that was carrying the network sat at speed zero
+	 * afterwards, mode still DISCHARGING, weight stopped, nothing logged.
+	 */
+	@GameTest(template = "test_rig", timeoutTicks = 400)
+	public static void aWrenchedBatteryKeepsDrivingTheShaft(GameTestHelper helper) {
+		rig(helper);
+		// A shaft on the other axis too, so rotating the battery does not simply disconnect it -- that
+		// would idle it for a legitimate reason and prove nothing about re-arming the source.
+		helper.setBlock(new BlockPos(3, SHAFT_Y, 6), AllBlocks.SHAFT.getDefaultState()
+			.setValue(BlockStateProperties.AXIS, Direction.Axis.Z));
+		hangWeight(helper, 3, HIGH_TOP);
+		activate(helper, BATTERY_A);
+
+		// No motor, so the battery is the network's only source and is letting the weight down.
+		helper.runAfterDelay(40, () -> {
+			GravityBatteryBlockEntity battery = battery(helper, BATTERY_A);
+			helper.assertTrue(battery.getMode() == BatteryMode.DISCHARGING,
+				"expected the battery to be driving the shaft, it is " + battery.getMode());
+			helper.assertTrue(battery.getTheoreticalSpeed() != 0,
+				"the battery should have a speed before it is wrenched");
+
+			// Exactly what the wrench does: swap in the rotated state through Create's own helper.
+			KineticBlockEntity.switchToBlockState(helper.getLevel(), helper.absolutePos(BATTERY_A),
+				helper.getBlockState(BATTERY_A)
+					.setValue(HorizontalAxisKineticBlock.HORIZONTAL_AXIS, Direction.Axis.Z));
+		});
+
+		helper.runAfterDelay(120, () -> {
+			GravityBatteryBlockEntity battery = battery(helper, BATTERY_A);
+			helper.assertTrue(battery.getTheoreticalSpeed() != 0,
+				"the battery stopped driving after being wrenched; mode is " + battery.getMode()
+					+ " and speed is " + battery.getTheoreticalSpeed());
 			helper.succeed();
 		});
 	}
