@@ -19,6 +19,8 @@ import com.simibubi.create.AllBlocks;
 import com.simibubi.create.api.behaviour.display.DisplaySource;
 import com.simibubi.create.api.contraption.BlockMovementChecks;
 import com.simibubi.create.content.kinetics.base.HorizontalAxisKineticBlock;
+import com.simibubi.create.content.kinetics.transmission.sequencer.SequencedGearshiftBlockEntity.SequenceContext;
+import com.simibubi.create.content.kinetics.transmission.sequencer.SequencerInstructions;
 import com.simibubi.create.content.redstone.displayLink.DisplayLinkContext;
 import com.simibubi.create.content.redstone.displayLink.target.DisplayTargetStats;
 import com.simibubi.create.content.redstone.thresholdSwitch.ThresholdSwitchObservable;
@@ -502,6 +504,43 @@ public class GBGameTests {
 			float expected = SHAFT_Y - 1 - HIGH_TOP;
 			helper.assertTrue(Math.abs(battery.offset - expected) < 0.2F,
 				"it should have found the weight at offset " + expected + ", it is at " + battery.offset);
+			helper.succeed();
+		});
+	}
+
+	/**
+	 * A battery must not be left holding a Sequenced Gearshift's travel limit.
+	 *
+	 * <p>Create's actuator takes a {@code TURN_DISTANCE} instruction as a distance to move, counts it
+	 * down against every tick of movement, and once it is spent sets {@code locked} — which forces a
+	 * re-sync and a hard client-side snap <em>every tick</em> for as long as the sequence holds. A
+	 * battery's direction comes from its mode rather than from the shaft, so it has nothing to steer with
+	 * the instruction and was honouring only the cost.
+	 *
+	 * <p>The context is staged directly rather than by building a gearshift, whose instructions live in
+	 * GUI state a GameTest cannot reach. It has to be staged at all: {@code super.onSpeedChanged} clears
+	 * the limit on the way in and only re-imposes it when a context is present, so a test without one
+	 * passes whether or not this mod does anything — which is what the first version of this test did.
+	 */
+	@GameTest(template = "test_rig", timeoutTicks = 200)
+	public static void aBatteryIgnoresASequencedDistance(GameTestHelper helper) {
+		rig(helper);
+		hangWeight(helper, 3, HIGH_TOP);
+		activate(helper, BATTERY_A);
+		drive(helper);
+
+		helper.runAfterDelay(SETTLE_TICKS + 10, () -> {
+			GravityBatteryBlockEntity battery = battery(helper, BATTERY_A);
+			helper.assertTrue(battery.getSpeed() != 0,
+				"the rig needs a turning shaft for the limit to come out non-zero");
+
+			battery.sequenceContext =
+				new SequenceContext(SequencerInstructions.TURN_DISTANCE, 4.0);
+			battery.onSpeedChanged(0);
+
+			helper.assertTrue(!battery.hasSequencedLimit(),
+				"a Sequenced Gearshift's travel limit survived onSpeedChanged, so the actuator will "
+					+ "force a re-sync every tick once it is spent");
 			helper.succeed();
 		});
 	}

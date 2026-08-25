@@ -669,10 +669,38 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 	public void onSpeedChanged(float prevSpeed) {
 		float keep = offset;
 		super.onSpeedChanged(prevSpeed);
+		ignoreSequencedDistance();
 		if (offset == keep)
 			return;
 		offset = keep;
 		resetContraptionToOffset();
+	}
+
+	/**
+	 * A battery takes no notice of a Sequenced Gearshift, and saying so is cheaper than half-obeying one.
+	 *
+	 * <p>{@code LinearActuatorBlockEntity} accepts a {@code TURN_DISTANCE} instruction as a travel limit,
+	 * counts it down against every tick of movement, and once it is spent sets {@code locked} — which
+	 * forces a re-sync and a hard client-side snap <em>every tick</em>, for as long as the sequence
+	 * holds. {@link #getMovementSpeed()} does not honour the limit, because a battery's direction comes
+	 * from its mode rather than from the shaft, so "turn this far" has nothing to steer. Half-obeying it
+	 * therefore bought a packet per tick and a stuttering weight on any network that happened to have a
+	 * gearshift on it, and bought no control at all.
+	 *
+	 * <p>Cleared rather than never set, because the base class sets it inside
+	 * {@code super.onSpeedChanged} and again out of NBT on load.
+	 *
+	 * <p>Not covered by a GameTest end to end: staging it needs a Sequenced Gearshift with a configured
+	 * instruction driving the battery's network, which is GUI state. {@code aBatteryIgnoresASequencedDistance}
+	 * asserts the invariant this method exists for instead.
+	 */
+	private void ignoreSequencedDistance() {
+		sequencedOffsetLimit = -1;
+	}
+
+	/** Whether an actuator distance limit is in force. Always false here; see {@link #ignoreSequencedDistance()}. */
+	public boolean hasSequencedLimit() {
+		return sequencedOffsetLimit >= 0;
 	}
 
 	/**
@@ -911,6 +939,8 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 		restingOffset = compound.getFloat("RestingOffset");
 		reversed = compound.getBoolean("Reversed");
 		rememberedSpeed = compound.getFloat("RememberedSpeed");
+		// A world saved while a gearshift had a limit on this battery must not load one back.
+		ignoreSequencedDistance();
 		// The actuator parks a client-side contraption until the next speed change when it collides,
 		// and a battery's speed need never change again -- the mode changes instead. Treat a mode
 		// change as the release.

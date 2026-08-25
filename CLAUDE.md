@@ -257,6 +257,16 @@ mappings, so the output uses the same names the code here compiles against.
 - **A Display Link source's name comes from its registry id**, as
   `<namespace>.display_source.<path>`, and appears in nothing that looks like a translation call. It is
   in `check_lang.py`'s coverage for that reason.
+- **A battery ignores a Sequenced Gearshift, and half-obeying one was worse than either.**
+  `LinearActuatorBlockEntity` accepts a `TURN_DISTANCE` instruction as a travel limit, counts it down
+  against every tick of movement, and once it is spent sets `locked` — which forces a re-sync and a hard
+  client-side snap *every tick* for as long as the sequence holds. `getMovementSpeed()` never honoured
+  the limit, because a battery's direction comes from its mode rather than from the shaft, so there was
+  nothing for "turn this far" to steer: the block paid the cost and got no control.
+  `ignoreSequencedDistance()` clears it after `super.onSpeedChanged` (which is where the base class
+  imposes it) and again on load. `aBatteryIgnoresASequencedDistance` has to stage a real
+  `SequenceContext` to mean anything — `super.onSpeedChanged` clears the limit on the way in and only
+  re-imposes it when a context is present, so the first version of that test passed with the fix removed.
 - **The block is in Create's `non_movable` tag, and that is data safety rather than taste.** Create's
   own Rope Pulley can be carried by a contraption, but it is *handled*: `Contraption.moveBlock`
   special-cases `PulleyBlock` to bring the rope along, and Create's own ponder scene says pulleys are
@@ -491,6 +501,33 @@ Releases go out through `publishMods` (`me.modmuss50.mod-publish-plugin`), drive
 - **The comparator and the Threshold Switch share `chargeOnScale`.** They worked the charge out
   separately — one rounding, one ceiling — and disagreed at the ends: a battery at 0.3% gave a
   comparator a strength of 1 while telling a Threshold Switch it was at 0.
+
+## Multiplayer
+
+Audited by reading the sync path rather than by playing on a server, which is still the one test that
+has not happened. What the audit established:
+
+- **`GBConfig` is `ModConfig.Type.SERVER`, and that is load-bearing.** `ConfigSync.syncConfigs()` sends
+  exactly the SERVER configs to a joining client, and `getMovementSpeed()` reads `gearReduction` on
+  *both* sides. Move this to COMMON and client and server move the weight at different rates, which
+  desyncs permanently and unrecoverably. Do not.
+- **Every field the client needs is written unconditionally**, so it is in the client packet as well as
+  the save: mode, idle reason, weight, resting offset, reversed, remembered speed. So is
+  `GravityBatteryContraption`'s `InitialOffset`, which the entity spawn packet carries and the renderer
+  needs to get the cable's length right.
+- **`getMovementSpeed()` keeps Create's convergence machinery.** The `+ clientOffsetDiff / 2` term and
+  the `ServerSpeedProvider` multiply are what pull a drifting client back; the override changes where
+  the *sign* comes from, not how the client catches up. Don't drop either when editing it.
+- **Direction-change latency is real but small at the default gearing.** Between the server changing
+  mode and the packet landing, a client keeps moving the old way and then eases back. At 32 RPM and
+  `gearReduction` 8 that is 0.0078 blocks/tick — a quarter of a pixel over a 100 ms round trip. At
+  `gearReduction` 1 on a fast network the movement clamps at 0.49 blocks/tick and the same latency is
+  most of a block, which would read as rubber-banding. The gear reduction is what hides it.
+- **An assembled battery re-syncs every 3 ticks for ever** (`setLazyTickRate(3)`, and `lazyTick` sends
+  whenever `movedContraption != null`). Create's pulleys and pistons go quiet because they disassemble
+  when they stop; a battery never does. Within Create's norms — a bearing is permanently assembled too
+  — but it is the one cost that scales with battery count, and worth measuring before tuning.
+- **No static mutable state**, so nothing leaks between players or worlds.
 
 ## Known gaps
 
