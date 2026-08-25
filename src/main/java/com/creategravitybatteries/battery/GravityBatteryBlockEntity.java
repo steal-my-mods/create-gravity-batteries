@@ -343,6 +343,14 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 		if (!running || movedContraption == null || weightBlocks <= 0)
 			return idle(IdleReason.NO_WEIGHT);
 
+		// A stalled contraption is one whose actors are busy -- a drill on the weight's underside
+		// grinding through a block, most often. Create freezes the offset while that lasts, so a
+		// battery that kept its mode would supply its full rating with the weight motionless, for as
+		// long as the drill took. Which is for ever, if it is on something it cannot get through.
+		// Capacity is only ever paid for by descent; no movement, no trade, in either direction.
+		if (movedContraption.isStalled())
+			return idle(IdleReason.JAMMED);
+
 		float headroom = networkCapacityWithoutSelf() - networkStressWithoutSelf();
 
 		// Nothing else on this network can turn it, and there is something attached worth turning. The

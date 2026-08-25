@@ -16,6 +16,11 @@ public enum IdleReason {
 	FULLY_CHARGED,
 	/** The weight is sitting on something; there is nothing left to spend. */
 	DISCHARGED,
+	/**
+	 * The weight is jammed on something — a drill or a saw on its underside chewing through a block it
+	 * cannot pass in one tick. Create calls this a stalled contraption.
+	 */
+	JAMMED,
 	/** Nothing is turning the shaft, so there is no surplus to draw on. */
 	NOT_TURNING,
 	/** The network is turning but has less capacity spare than winding would cost. */

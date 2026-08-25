@@ -18,6 +18,7 @@
   "creategravitybatteries.tooltip.gravity_battery.idle.no_weight": "Nothing attached",
   "creategravitybatteries.tooltip.gravity_battery.idle.fully_charged": "Fully wound",
   "creategravitybatteries.tooltip.gravity_battery.idle.discharged": "Weight is resting",
+  "creategravitybatteries.tooltip.gravity_battery.idle.jammed": "Weight is jammed",
   "creategravitybatteries.tooltip.gravity_battery.idle.not_turning": "Shaft is not turning",
   "creategravitybatteries.tooltip.gravity_battery.idle.no_surplus": "No surplus to draw on",
   "creategravitybatteries.tooltip.gravity_battery.needs": "needs %1$s, has %2$s",

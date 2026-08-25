@@ -34,6 +34,11 @@ that was running at the time:
   truncates to a whole block instead of snapping to a sixteenth, and `signum(0) == 0` makes "stopped"
   count as a sign change. Since a battery's offset is its charge, flicking the drive on and off was a
   way to charge it for nothing.
+- A battery whose weight was jammed — a drill or saw on its underside chewing through a block, which
+  Create handles by freezing the contraption — kept supplying its full rating at a dead stop, for as
+  long as the jam lasted. Measured on a drill over obsidian: 350 ticks of capacity without moving, and
+  it never would have restarted. A jammed battery now stands down, which also lets the drill get on
+  with the block instead of hanging on it for ever.
 - A battery that was given rotation with nothing hung under it walked down the shaft, tore the first
   solid block it found out of the world, and kept it. Rotation may now only take a weight that is
   flush against the battery's underside; reaching down the shaft is offered only to a player who

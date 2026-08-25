@@ -95,6 +95,25 @@ mappings, so the output uses the same names the code here compiles against.
   down the shaft once at assembly and that figure is the battery's capacity. Without it the charge
   readout is `offset / maxCableLength`, which calls a weight resting on the floor 90% charged.
   `theDropIsMeasuredRatherThanAssumed` fails on a build that returns the config value instead.
+- **A stalled contraption is the third way a weight stops moving, and it is not a collision.** Drills
+  and saws on a weight's underside stall the contraption while they chew through a block, and Create
+  freezes the offset for as long as that lasts — `collided()` never fires and `canDescend()` is
+  perfectly true, because the weight *could* descend, it just is not. A battery that kept its mode
+  through that supplied its full rating at a dead stop: measured on a drill over obsidian,
+  `off=1.859` unchanged for 350 ticks with `cap=8` the whole time, and it never restarted.
+  `decideMode` idles on `movedContraption.isStalled()` for that reason, in either direction — no
+  movement, no trade. `aJammedWeightSuppliesNothing` is the lock.
+- **Idling on the stall is also what un-jams it.** Before the guard, a drill on obsidian hung for ever;
+  with it, the battery stands down for the stalled tick and the weight works its way down. So the
+  scenario the guard was written for cannot be reproduced any more, which is why that test asserts a
+  per-tick invariant — capacity must be zero on every stalled tick — rather than parking the weight
+  somewhere it jams permanently. It counts the stalls it saw, too, or a run where nothing stalled
+  would pass having proved nothing.
+- **A drill on the weight makes the drop probe read much deeper, and that is correct.**
+  `ContraptionCollider.isCollidingWithWorld` lets a block-breaking behaviour pass anything it
+  `canBreak`, so a drilling weight really can descend through stone. It does mean the stated drop is a
+  distance the weight can only cover at drilling speed, which is far slower than the descent rate the
+  duration arithmetic assumes — the charge reading stays honest, the time estimate does not.
 - **`canDescend()` is what refuses free energy, and `collided()` is its backstop.** Capacity is only
   supplied while the weight can actually fall. Removing either guard leaves a battery whose weight is
   on the floor supplying stress for ever — the one failure mode a gravity battery has.

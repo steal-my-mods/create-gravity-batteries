@@ -564,6 +564,75 @@ public class GBGameTests {
 		});
 	}
 
+	// --- a weight that is not moving --------------------------------------------------------------
+
+	/**
+	 * A weight that is not moving must not be paying out.
+	 *
+	 * <p>Drills and saws on a weight's underside stall the contraption while they chew through a block,
+	 * and Create freezes the offset for as long as that lasts. The battery kept its mode through it and
+	 * so kept supplying its full rating with the weight motionless — measured before the fix, on a drill
+	 * over obsidian: {@code off=1.859} unchanged for 350 ticks and counting, {@code cap=8} throughout.
+	 * Free energy by a route {@link GravityBatteryBlockEntity#canDescend()} cannot see, because the
+	 * weight <em>could</em> descend, it simply was not doing so.
+	 *
+	 * <p>Asserted as a per-tick invariant rather than by parking the weight somewhere it jams for ever,
+	 * because the fix removed that state: idling for the stalled tick is what lets the drill get on with
+	 * the block, so the weight now works its way down instead of hanging. The stalls are brief and
+	 * frequent, and the rule is that not one of them may be paid for. The number of stalls seen is
+	 * asserted too, or a run in which nothing ever stalled would pass while proving nothing.
+	 *
+	 * <p>Note the drop is measured straight through the obsidian: Create's collision test lets a drill
+	 * pass anything it can break, so a drilling weight really can descend that far. That part is right.
+	 */
+	@GameTest(template = "test_rig", timeoutTicks = 700)
+	public static void aJammedWeightSuppliesNothing(GameTestHelper helper) {
+		floor(helper);
+		placeBattery(helper, BATTERY_A);
+		helper.setBlock(SHAFT, AllBlocks.SHAFT.getDefaultState()
+			.setValue(BlockStateProperties.AXIS, Direction.Axis.X));
+
+		// A slime weight with a drill on its underside, hung flush, over a column of obsidian.
+		helper.setBlock(new BlockPos(3, SHAFT_Y - 1, 5), Blocks.SLIME_BLOCK);
+		helper.setBlock(new BlockPos(3, SHAFT_Y - 2, 5), AllBlocks.MECHANICAL_DRILL.getDefaultState()
+			.setValue(BlockStateProperties.FACING, Direction.DOWN));
+		for (int y = 1; y <= 6; y++)
+			helper.setBlock(new BlockPos(3, y, 5), Blocks.OBSIDIAN);
+		activate(helper, BATTERY_A);
+
+		int[] stalledTicks = new int[1];
+		int[] stalledAndPaid = new int[1];
+		List<String> paidWhileStalled = new ArrayList<>();
+		for (int tick = 30; tick <= 600; tick++) {
+			int at = tick;
+			helper.runAfterDelay(at, () -> {
+				GravityBatteryBlockEntity battery = battery(helper, BATTERY_A);
+				if (battery.getAttachedContraption() == null || !battery.getAttachedContraption()
+					.isStalled())
+					return;
+				stalledTicks[0]++;
+				float capacity = battery.calculateAddedStressCapacity();
+				// Only the first few: on the behaviour this locks, every tick offends, and a failure
+				// message with 571 entries in it is not a better failure message.
+				if (capacity > 0 && paidWhileStalled.size() < 4)
+					paidWhileStalled.add("t=" + at + " offset=" + battery.offset + " cap=" + capacity);
+				else if (capacity > 0)
+					stalledAndPaid[0]++;
+			});
+		}
+
+		helper.runAfterDelay(620, () -> {
+			helper.assertTrue(stalledTicks[0] > 0,
+				"the drill never stalled once, so this test proved nothing -- the rig needs a block it "
+					+ "has to stop and chew");
+			helper.assertTrue(paidWhileStalled.isEmpty(),
+				"the battery supplied capacity with its weight stalled on "
+					+ (paidWhileStalled.size() + stalledAndPaid[0]) + " ticks, first few: "
+					+ paidWhileStalled);
+			helper.succeed();
+		});
+	}
+
 	// --- Threshold Switch and Display Link ---------------------------------------------------------
 
 	/**
