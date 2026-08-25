@@ -17,6 +17,7 @@ import com.creategravitybatteries.registry.GBBlocks;
 import com.creategravitybatteries.registry.GBDisplaySources;
 import com.simibubi.create.AllBlocks;
 import com.simibubi.create.api.behaviour.display.DisplaySource;
+import com.simibubi.create.api.contraption.BlockMovementChecks;
 import com.simibubi.create.content.kinetics.base.HorizontalAxisKineticBlock;
 import com.simibubi.create.content.redstone.displayLink.DisplayLinkContext;
 import com.simibubi.create.content.redstone.displayLink.target.DisplayTargetStats;
@@ -619,6 +620,32 @@ public class GBGameTests {
 				"...without complaint; it says " + battery.getLastAssemblyException());
 			helper.succeed();
 		});
+	}
+
+	/**
+	 * A battery may not be carried by another contraption, and that is data safety rather than taste.
+	 *
+	 * <p>Create's own Rope Pulley can be moved, but it is handled: {@code Contraption.moveBlock}
+	 * special-cases {@code PulleyBlock} to bring the rope along, and Create's ponder scene says plainly
+	 * that pulleys are only movable while stopped. A battery is never stopped in that sense — it is
+	 * holding a weight — and it gets none of that handling. Sweep one into a piston and its block
+	 * vanishes from under the weight; the weight's entity then finds no controller and
+	 * {@code ControlledContraptionEntity.tickContraption} calls {@code discard()}, which deletes the
+	 * blocks rather than putting them back. Breaking a battery is fine — that goes through
+	 * {@code remove()} to {@code disassemble()} — it is being carried off that loses the weight.
+	 *
+	 * <p>So the block is in Create's {@code non_movable} tag. Asserted through
+	 * {@code BlockMovementChecks}, which is the thing every contraption actually asks.
+	 */
+	@GameTest(template = "test_rig", timeoutTicks = 100)
+	public static void aBatteryCannotBeCarriedOffByAnotherContraption(GameTestHelper helper) {
+		rig(helper);
+		BlockPos absolute = helper.absolutePos(BATTERY_A);
+		helper.assertTrue(
+			!BlockMovementChecks.isMovementAllowed(helper.getBlockState(BATTERY_A), helper.getLevel(),
+				absolute),
+			"a contraption is allowed to carry the battery off, which deletes the weight it was holding");
+		helper.succeed();
 	}
 
 	// --- Threshold Switch and Display Link ---------------------------------------------------------

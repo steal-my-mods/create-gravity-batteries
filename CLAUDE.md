@@ -245,6 +245,15 @@ mappings, so the output uses the same names the code here compiles against.
 - **A Display Link source's name comes from its registry id**, as
   `<namespace>.display_source.<path>`, and appears in nothing that looks like a translation call. It is
   in `check_lang.py`'s coverage for that reason.
+- **The block is in Create's `non_movable` tag, and that is data safety rather than taste.** Create's
+  own Rope Pulley can be carried by a contraption, but it is *handled*: `Contraption.moveBlock`
+  special-cases `PulleyBlock` to bring the rope along, and Create's own ponder scene says pulleys are
+  only movable while stopped. A battery is never stopped in that sense and gets none of that handling.
+  Sweep one into a piston and its block leaves the world without going through `remove()`, so the
+  weight's entity finds no controller and `ControlledContraptionEntity.tickContraption` calls
+  `discard()` — which deletes the blocks instead of putting them back. Breaking a battery is fine;
+  being carried off is what loses the weight. `aBatteryCannotBeCarriedOffByAnotherContraption` asserts
+  it through `BlockMovementChecks`, which is what a contraption actually asks.
 - **`hasAnalogOutputSignal` is only half of a comparator output.** Nothing polls it: a block has to
   call `level.updateNeighbourForOutputSignal` when the value moves, which `refreshComparator` does once
   per changed step. Without it the reading a comparator latched when it was placed never changed again

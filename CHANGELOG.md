@@ -38,6 +38,10 @@ that was running at the time:
   contraption while they work, which freezes it in place, and a battery paid by the tick rather than by
   the block would earn its full rating standing still. A battery now refuses such a weight and says so
   on its own face; cut the shaft with a Rope Pulley first, which is the block for it.
+- A battery carried off by another contraption deleted the weight it was holding: the block left the
+  world without going through its own removal, so the weight's entity found no controller and
+  discarded itself. Batteries are now in Create's `non_movable` tag — breaking one still returns its
+  weight, as it always did.
 - A battery that was given rotation with nothing hung under it walked down the shaft, tore the first
   solid block it found out of the world, and kept it. Rotation may now only take a weight that is
   flush against the battery's underside; reaching down the shaft is offered only to a player who
