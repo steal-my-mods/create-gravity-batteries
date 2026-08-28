@@ -131,6 +131,41 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 	 */
 	private int lastComparatorOutput;
 
+	/**
+	 * The offset as the client was last told it, so {@link #lazyTick()} can tell a stale client from a
+	 * settled one. NaN until the first send, and NaN equals nothing — so the first resync always goes.
+	 */
+	private float lastSyncedOffset = Float.NaN;
+
+	/** Set only while {@code super.lazyTick()}'s unconditional resync is being held back. */
+	private boolean holdingBackTheIdleResync;
+
+	/**
+	 * The tick this battery last told the client anything, or {@link Long#MIN_VALUE} if it never has.
+	 *
+	 * <p>Deliberately part of the block's state rather than a debug counter: once a block decides its
+	 * own sync cadence instead of taking Create's fixed one, when it last spoke is the thing that
+	 * cadence is made of. It is also the only handle a dedicated server has on whether the gate in
+	 * {@link #lazyTick()} is working -- a GameTest cannot see the wire, so
+	 * {@code anIdleBatteryStopsRepeatingItself} watches this instead.
+	 */
+	private long lastSyncTick = Long.MIN_VALUE;
+
+	/**
+	 * The last answer {@link #restingOnSomething()} gave, with the tick and offset it was measured at.
+	 *
+	 * <p>Two call sites reach {@link #canDescend()} in one tick and neither can see the other — the
+	 * reprobe condition in {@link #tick()} and the discharge branch of {@link #decideMode()} — so a
+	 * weight resting on the floor with the network in deficit walked the colliders twice every tick,
+	 * for as long as the base stayed dark. Measured at 2.00 probes a tick in that state, against 1.00
+	 * while descending and 0.00 either side of charging.
+	 */
+	private long restingMeasuredAtTick = Long.MIN_VALUE;
+
+	private float restingMeasuredAtOffset;
+
+	private boolean restingMeasurement;
+
 	public GravityBatteryBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
 		super(type, pos, state);
 	}
@@ -142,6 +177,67 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 		// nothing to choose between and showing the scroll slot would only promise a setting that does
 		// nothing. The field itself stays -- the base class reads it through getMovementMode().
 		behaviours.remove(movementMode);
+	}
+
+	/**
+	 * Whether the periodic resync has anything new to tell the client.
+	 *
+	 * <p>The offset is the only synced field that moves without anything calling {@link #sendData()};
+	 * every other one sends on the spot when it changes. So this is the whole question the resync
+	 * exists to answer.
+	 */
+	public boolean hasUnsyncedMovement() {
+		return offset != lastSyncedOffset;
+	}
+
+	/**
+	 * A battery that is not moving stops repeating itself.
+	 *
+	 * <p>{@code LinearActuatorBlockEntity#lazyTick} resyncs unconditionally for as long as a
+	 * contraption is attached, at {@code setLazyTickRate(3)} — a packet every fourth tick. A Rope
+	 * Pulley only pays that while it is moving, because it disassembles when it stops; a battery never
+	 * lets go, so it paid it for the rest of the world's life, per battery, per player tracking the
+	 * chunk. Measured: 255–293 bytes of NBT a time, each becoming <em>two</em> packets in
+	 * {@code ChunkHolder#broadcastChanges} — a block update and a block entity update. And across ten
+	 * consecutive syncs of a battery holding station, twelve of the thirteen synced fields were
+	 * identical; the thirteenth was {@code ForceMovement}, which clears itself.
+	 *
+	 * <p>Safe because a stationary weight generates no drift to correct: {@code clientOffsetDiff} is
+	 * the client's correction for an offset that moved, and an offset that did not move needs none.
+	 *
+	 * <p>Held back with a flag rather than by skipping {@code super}. Today the chain is
+	 * {@code SmartBlockEntity#lazyTick}, which is empty, plus that one conditional send — so the flag
+	 * has exactly one thing to catch, and calling {@code super} keeps whatever Create puts there next.
+	 */
+	@Override
+	public void lazyTick() {
+		holdingBackTheIdleResync = level != null && !level.isClientSide && movedContraption != null
+			&& !hasUnsyncedMovement();
+		try {
+			super.lazyTick();
+		} finally {
+			holdingBackTheIdleResync = false;
+		}
+	}
+
+	/**
+	 * Records what the client has been told. Every send goes through here, whatever asked for it, so
+	 * {@link #hasUnsyncedMovement()} measures against the last packet rather than the last lazy tick.
+	 */
+	@Override
+	public void sendData() {
+		if (holdingBackTheIdleResync)
+			return;
+		if (level != null && !level.isClientSide) {
+			lastSyncedOffset = offset;
+			lastSyncTick = level.getGameTime();
+		}
+		super.sendData();
+	}
+
+	/** When this battery last told the client anything. See {@link #lastSyncTick}. */
+	public long getLastSyncTick() {
+		return lastSyncTick;
 	}
 
 	public BatteryMode getMode() {
@@ -269,6 +365,11 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 		if (observed > 0 && observed != rememberedSpeed) {
 			rememberedSpeed = observed;
 			setChanged();
+			// The client reads this through getGeneratedSpeed() for the goggle overlay's capacity
+			// line. It used to reach the client on the next unconditional resync; now that an idle
+			// battery has none, it has to say so itself. Cheap -- a network's speed is discrete and
+			// changes only when the network does.
+			sendData();
 		}
 	}
 
@@ -283,6 +384,8 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 		if (shaftSpeed > 0 != !reversed) {
 			reversed = !reversed;
 			setChanged();
+			// Also read client-side through getGeneratedSpeed(), and also used to ride the resync.
+			sendData();
 		}
 	}
 
@@ -461,8 +564,20 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 		if (movedContraption == null
 			|| !(movedContraption.getContraption() instanceof GravityBatteryContraption contraption))
 			return true;
-		return ContraptionCollider.isCollidingWithWorld(level, contraption,
+
+		// One measurement per tick, not one per caller. Keyed on the tick as well as the offset, so
+		// the question is still put to the world every tick: a weight whose floor is dug out from
+		// under it has an unchanged offset, and clearingTheFloorLetsTheWeightCarryOnDown is what
+		// fails if this is ever allowed to cache across ticks.
+		long now = level.getGameTime();
+		if (restingMeasuredAtTick == now && restingMeasuredAtOffset == offset)
+			return restingMeasurement;
+
+		restingMeasuredAtTick = now;
+		restingMeasuredAtOffset = offset;
+		restingMeasurement = ContraptionCollider.isCollidingWithWorld(level, contraption,
 			worldPosition.below((int) offset + 2), Direction.DOWN);
+		return restingMeasurement;
 	}
 
 	public boolean canAscend() {
@@ -475,6 +590,13 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 		for (Direction.AxisDirection sign : Direction.AxisDirection.values()) {
 			Direction side = Direction.get(sign, axis);
 			BlockPos neighbour = worldPosition.relative(side);
+			// Asking a ServerLevel for a block state force-loads its chunk, and this runs every tick
+			// on a network with no source -- so a battery at the edge of the loaded area would try to
+			// load a chunk per tick. Create's own propagator declines to work on unloaded positions
+			// for the same reason, and declining is the conservative direction here: an unloaded
+			// neighbour is not a shaft worth spending charge into.
+			if (!level.isLoaded(neighbour))
+				continue;
 			BlockState state = level.getBlockState(neighbour);
 			if (state.getBlock() instanceof IRotate rotate
 				&& rotate.hasShaftTowards(level, neighbour, state, side.getOpposite()))

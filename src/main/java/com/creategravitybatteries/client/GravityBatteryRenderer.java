@@ -22,6 +22,7 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.level.BlockAndTintGetter;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * Draws the rotating shaft through the block, and the cable and clamp hanging below it.
@@ -45,11 +46,24 @@ public class GravityBatteryRenderer extends SafeBlockEntityRenderer<GravityBatte
 		return true;
 	}
 
+	/**
+	 * The radius batteries are drawn from. Kept in {@link CableGeometry} so a GameTest can pin it.
+	 *
+	 * <p>This was 128, to cover a weight hanging in sight below a battery that was not. That is
+	 * {@link #shouldRender} 's job now, and it does it by measuring to the nearest point of the
+	 * assembly rather than to the block — which answers the original question exactly instead of
+	 * approximately, and lets the radius go back to the vanilla default.
+	 */
 	@Override
 	public int getViewDistance() {
-		// A battery's weight can hang far enough below the block that the block's own chunk is out of
-		// range while the weight is in plain sight.
-		return 128;
+		return CableGeometry.VIEW_RADIUS;
+	}
+
+	/** Renders while any part of the assembly is in range, not only while the block is. */
+	@Override
+	public boolean shouldRender(GravityBatteryBlockEntity be, Vec3 cameraPos) {
+		return CableGeometry.withinViewRadius(be.getBlockPos(), be.offset, cameraPos,
+			getViewDistance());
 	}
 
 	@Override

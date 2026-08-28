@@ -137,6 +137,23 @@ mappings, so the output uses the same names the code here compiles against.
   answer: a one-step `isCollidingWithWorld` against the block actually below. Cheap enough per tick,
   because the *walk* still only runs when the cached figure has been shown to be wrong.
   `clearingTheFloorLetsTheWeightCarryOnDown` fails on the old comparison.
+- **`restingOnSomething()` is measured once a tick, not once a caller.** Two call sites reach
+  `canDescend()` in the same tick and neither can see the other: the reprobe condition in `tick()` and
+  the discharge branch of `decideMode()`. Both are live in the state a discharged battery sits in for
+  as long as the base is dark, so a weight resting on the floor walked the collider set twice every
+  tick — measured at 2.00 probes a tick there, against 1.00 while descending and 0.00 either side of
+  charging. The walk is Create's `isCollidingWithWorld` over the weight's *bottom footprint*, so it is
+  16 block-state and collision-shape lookups for an ordinary 4×4×2 weight and 64 for an 8×8 one. The
+  cache is keyed on the **tick as well as the offset**, and the tick half is what keeps it honest: a
+  weight whose floor is dug out from under it has an unchanged offset, so a cache that outlived the
+  tick would report it still resting for ever. `clearingTheFloorLetsTheWeightCarryOnDown` is what fails
+  on that mutation — verified, not assumed.
+- **`hasSomethingToDrive()` will not force-load a chunk.** It reads both horizontal neighbours every
+  tick on a network with no source, and `Level#getBlockState` on a `ServerLevel` goes through
+  `getChunk(x, z)` with force-load *true* — so a battery at the edge of the loaded area would try to
+  load a chunk per tick. Guarded with `level.isLoaded(neighbour)`, which is what Create's own
+  propagator does, and which fails in the conservative direction: an unloaded neighbour is not a shaft
+  worth spending charge into.
 - **`reprobeDrop` runs at the two moments the measurement is known to be stale, and never per tick.**
   The weight arriving at the top, where a charge reading is about to be quoted from a possibly ancient
   figure; and the cached drop claiming the weight is at the bottom while `canDescend()` says otherwise,
@@ -309,6 +326,29 @@ mappings, so the output uses the same names the code here compiles against.
   full segment that close to the block. `cableGeometryNeverLightsFromInsideTheBattery` is the lock.
   Independent of `noOcclusion()`: that one is why there is light at the battery's position at all, this
   one is why the cable reads the position it occupies. Either alone leaves the other wrong.
+- **The per-frame client budget is `2 + segments(offset)` passes, and it is locked at the
+  `segments` end.** Every cable segment is a CPU pass through `DefaultSuperByteBuffer.renderInto`,
+  which loops per vertex and allocates three JOML objects for each — there is no Flywheel visual to
+  take over. `theCableCostsOnePassPerBlockOfDrop` asserts that one more block of drop costs exactly one
+  more pass, which is not a restatement of `ceil`: it is what fails if the cable is ever reworked to
+  Create's half-segment scheme or to sixteenths, multiplying the budget by 16. Verified against that
+  mutation. A GameTest can only reach the arithmetic, never the renderer — but see
+  *Testing the client* below, because "you cannot test the client" is a stronger claim than the truth.
+- **A battery is culled by its whole assembly, not by its block, and that is why the radius is 64.**
+  The default `shouldRender` measures to the block's own position, which is the wrong question for a
+  block whose visible extent hangs as far below it as the cable is long. That used to be answered by
+  returning 128 from `getViewDistance()`, which was wrong twice: it still measured to the block, so it
+  moved the boundary rather than removing it — a battery 130 blocks up with its weight beside you still
+  vanished — and quadrupling the radius multiplied by about eight the volume of batteries drawn every
+  frame. That volume is expensive here in a way it is not for Create's pulley, which has a Flywheel
+  visual: with none, each battery in range costs `2 + ceil(offset)` CPU vertex passes a frame, each
+  allocating three JOML objects per vertex in `DefaultSuperByteBuffer.renderInto`.
+  `CableGeometry.withinViewRadius` clamps the viewer's height into the assembly's vertical span to get
+  the nearest point, which answers the original question exactly and lets the radius go back to the
+  vanilla 64 that Create's own kinetic blocks use. `VIEW_RADIUS` lives in `CableGeometry` rather than
+  the renderer **so a test can pin the number** — `cullingFollowsTheWholeAssemblyNotJustTheBlock` fails
+  both on measuring to the block and on the radius going back to 128, and the first version of that
+  test pinned a local `64` and so locked the rule while leaving the constant free.
 - **`CableGeometry` is out of the client package on purpose.** A GameTest runs on a dedicated server,
   which cannot load a class that mentions `PoseStack`, so cable arithmetic that lives in the renderer
   cannot be tested at all. Moving the rules out is what made a rendering bug lockable.
@@ -523,10 +563,30 @@ has not happened. What the audit established:
   `gearReduction` 8 that is 0.0078 blocks/tick — a quarter of a pixel over a 100 ms round trip. At
   `gearReduction` 1 on a fast network the movement clamps at 0.49 blocks/tick and the same latency is
   most of a block, which would read as rubber-banding. The gear reduction is what hides it.
-- **An assembled battery re-syncs every 3 ticks for ever** (`setLazyTickRate(3)`, and `lazyTick` sends
-  whenever `movedContraption != null`). Create's pulleys and pistons go quiet because they disassemble
-  when they stop; a battery never does. Within Create's norms — a bearing is permanently assembled too
-  — but it is the one cost that scales with battery count, and worth measuring before tuning.
+- **The periodic re-sync is gated on the offset having moved, and that gate is not optional now.**
+  `LinearActuatorBlockEntity#lazyTick` re-syncs unconditionally while a contraption is attached, at
+  `setLazyTickRate(3)`. Create's pulleys and pistons get away with it because they disassemble when they
+  stop; a battery never does, so it was a packet every fourth tick for the rest of the world's life,
+  per battery, per player tracking the chunk. Measured: 255–293 bytes of NBT a send, each becoming
+  *two* packets in `ChunkHolder#broadcastChanges` (a block update and a block entity update) — about
+  1.5 KB/s and 10 packets/s per battery per player — and across ten consecutive sends of a battery
+  holding station, twelve of the thirteen synced fields were byte-identical, the thirteenth being
+  `ForceMovement`, which clears itself. `lazyTick` is overridden to hold that send back when
+  `offset == lastSyncedOffset`; safe because `clientOffsetDiff` is the client's correction for an offset
+  that moved, and a stationary weight has no drift to correct. Held back through a flag rather than by
+  skipping `super`, because today the chain is an empty `SmartBlockEntity#lazyTick` plus that one
+  conditional send, so the flag has exactly one thing to catch.
+  `anIdleBatteryStopsRepeatingItself` is the lock and **both of its halves are load-bearing**: the
+  resting half fails on Create's unconditional version, the moving half fails on a gate clamped shut.
+  An earlier version asserted a `hasUnsyncedMovement()` predicate instead and passed on *both*
+  mutations, because that predicate is self-healing — any send at all clears it. It watches
+  `getLastSyncTick()` for that reason.
+- **`reversed` and `rememberedSpeed` have to send for themselves.** They used to call only
+  `setChanged()` and reach the client on the next unconditional re-sync. Both are read client-side
+  through `getGeneratedSpeed()` for the goggle overlay's capacity line, so once an idle battery stopped
+  re-syncing they would have gone stale for ever. They call `sendData()` now, which also makes them
+  arrive at once rather than up to four ticks late. Neither changes often enough for that to cost
+  anything — a network's speed is discrete, and `reversed` only moves on a gearshift flip.
 - **No static mutable state**, so nothing leaks between players or worlds.
 
 ## The Create interaction audit
@@ -575,6 +635,41 @@ toggles its weight, which works and is arguably useful. The recipe's `c:plates/i
 Create's Ponder index is what makes them findable, and nothing complains if you are not. `registerTags`
 joins four of Create's own pages — kinetic sources, movement anchor, threshold switch targets, display
 sources — each of which is a claim the block actually makes.
+
+## Testing the client
+
+There is no client-side GameTest, and that much is settled: the vanilla framework is server-only
+(`GameTestServer`, and the sole client-side class is a debug *renderer* for watching tests in-world),
+and `RuntimeDistCleaner` is active in dev, which is what throws "invalid dist DEDICATED_SERVER" the
+moment a server-dist run touches a client-only member. NeoForge's `junit` run type is **not** a way
+round it — `JUnitDevLaunchTarget.getDist()` returns `Dist.DEDICATED_SERVER`, so it is a nicer harness
+for pure logic and no help at all for the renderer, despite being handed client assets.
+
+What is *not* settled is the broader claim. Three routes exist, in increasing cost:
+
+1. **Put the arithmetic where a server can reach it, and assert the cost function.** What
+   `CableGeometry` is for, and now what `theCableCostsOnePassPerBlockOfDrop` and
+   `cullingFollowsTheWholeAssemblyNotJustTheBlock` do. Free, runs in the existing suite, and catches
+   the regressions that would actually hurt — an algorithmic change to the per-frame budget, or the
+   cull rule going back to measuring the block. Cannot see the renderer.
+2. **Plain JUnit against the merged jar, outside FML.** A `src/test/java` suite launched by Gradle's
+   own `test` task has no dist cleaner, so client classes load; `Bootstrap.bootStrap()` brings up
+   registries with no GL context. Enough for anything that is pure math on client classes —
+   `shouldRender` is the example. The catch is the classpath: Create, Catnip and Ponder are
+   deliberately `compileOnly` here (see the build quirk above), so they would have to be added to the
+   *test* runtime classpath only. Safe to do — a test classpath cannot double-load mods in the game —
+   but it is a new moving part in a build that is already unusual. Cannot bake models, so nothing that
+   touches a `PartialModel`.
+3. **A counting harness under `runClient`.** The real answer for per-frame cost. Boot the client, load
+   a world, place batteries, then call the renderer with a `MultiBufferSource` that counts vertices and
+   draw calls instead of drawing them, and assert on the counts. **Count the work, do not time it**:
+   counts are deterministic and GPU-independent, so they make a usable CI gate, whereas frame times
+   under the software rasteriser any headless CI runner will give you (Mesa llvmpipe behind Xvfb) put
+   the GPU's work on the CPU and swamp exactly the signal this mod cares about. Costs a client boot in
+   CI, a dev-only automation entrypoint, and a Gradle task; Linux-only in practice.
+
+Nothing above is built beyond route 1. Route 3 is what to reach for if the Flywheel visual is ever
+attempted, because that is the change whose whole point is a number no current test can see.
 
 ## Known gaps
 

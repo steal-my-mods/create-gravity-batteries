@@ -49,6 +49,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.ComparatorBlockEntity;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.Property;
+import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
 
@@ -1108,6 +1109,69 @@ public class GBGameTests {
 		});
 	}
 
+	// --- the periodic resync ----------------------------------------------------------------------
+
+	/**
+	 * A battery that is not moving must stop repeating itself to the client; a battery that is moving
+	 * must carry on.
+	 *
+	 * <p>Create's actuator resyncs unconditionally for as long as a contraption is attached, at
+	 * {@code setLazyTickRate(3)}. A Rope Pulley only pays that while it is moving, because it lets go
+	 * when it stops; a battery never lets go, so it was a block-entity packet every fourth tick for the
+	 * rest of the world's life -- per battery, per player tracking the chunk, and measured to be
+	 * identical in twelve of its thirteen fields across ten consecutive sends.
+	 *
+	 * <p>Watched through {@link GravityBatteryBlockEntity#getLastSyncTick()}, because a GameTest runs
+	 * on a dedicated server and cannot see the wire. Both halves are load-bearing and each catches the
+	 * opposite mistake: the resting half fails on Create's unconditional version, and the moving half
+	 * fails on a gate clamped shut, which would leave every client's weight to drift. An earlier
+	 * version of this test asserted {@code hasUnsyncedMovement()} instead and passed on both mutations,
+	 * because that predicate is self-healing -- any send at all clears it.
+	 */
+	@GameTest(template = "test_rig", timeoutTicks = 500)
+	public static void anIdleBatteryStopsRepeatingItself(GameTestHelper helper) {
+		rig(helper);
+		// Already on the floor, and no motor: IDLE, spent, and the offset never moves again.
+		hangWeight(helper, 3, RESTING_TOP);
+		activate(helper, BATTERY_A);
+
+		long[] syncedAtRest = new long[2];
+		helper.runAfterDelay(SETTLE_TICKS + 20,
+			() -> syncedAtRest[0] = battery(helper, BATTERY_A).getLastSyncTick());
+		helper.runAfterDelay(220, () -> {
+			GravityBatteryBlockEntity battery = battery(helper, BATTERY_A);
+			syncedAtRest[1] = battery.getLastSyncTick();
+			helper.assertTrue(battery.getMode() == BatteryMode.IDLE,
+				"the weight is on the floor with no drive, it should be idle; it is "
+					+ battery.getMode());
+			helper.assertTrue(syncedAtRest[0] != Long.MIN_VALUE,
+				"the battery never synced at all, so this test is watching nothing");
+			helper.assertTrue(syncedAtRest[1] == syncedAtRest[0],
+				"a battery holding station resynced anyway: last sync moved " + syncedAtRest[0] + " -> "
+					+ syncedAtRest[1] + " over 180 ticks");
+		});
+
+		// The other half: once it is moving again the resync must resume, or the gate has been shut on
+		// the case it exists to serve and every client's weight drifts.
+		long[] syncedWhileMoving = new long[2];
+		helper.runAfterDelay(230, () -> drive(helper));
+		helper.runAfterDelay(300,
+			() -> syncedWhileMoving[0] = battery(helper, BATTERY_A).getLastSyncTick());
+		helper.runAfterDelay(400, () -> {
+			GravityBatteryBlockEntity battery = battery(helper, BATTERY_A);
+			syncedWhileMoving[1] = battery.getLastSyncTick();
+			helper.assertTrue(battery.getMode() == BatteryMode.CHARGING,
+				"the motor is back, it should be winding up; it is " + battery.getMode());
+			helper.assertTrue(battery.offset > 0 && battery.offset < battery.getDropRange(),
+				"the weight has to be genuinely mid-travel for this half to mean anything, offset "
+					+ battery.offset);
+			helper.assertTrue(syncedWhileMoving[1] > syncedWhileMoving[0],
+				"a moving weight must keep being resynced; last sync sat at " + syncedWhileMoving[0]
+					+ " for 100 ticks");
+			helper.succeed();
+		});
+	}
+
 	// --- the cable's geometry ---------------------------------------------------------------------
 
 	/**
@@ -1135,6 +1199,108 @@ public class GBGameTests {
 			helper.assertTrue(CableGeometry.lightSource(battery, length)
 				.getY() <= battery.getY() - 1, "the clamp at length " + length + " lights from inside");
 		}
+		helper.succeed();
+	}
+
+	/**
+	 * The cable costs one render pass per block of drop, and that is the per-frame budget.
+	 *
+	 * <p>With no Flywheel visual to take over, every segment is a CPU pass through
+	 * {@code DefaultSuperByteBuffer.renderInto}, which loops per vertex and allocates three JOML objects
+	 * for each one. So the whole client cost of this block is {@code 2 + segments(offset)} passes a
+	 * frame — the shaft, the clamp, and one per segment — and what keeps that bounded is that
+	 * {@link CableGeometry#segments} counts <em>blocks</em>.
+	 *
+	 * <p>The assertion is that one more block of drop costs exactly one more pass. That is not a
+	 * restatement of {@code ceil}: it is what fails if the cable is ever reworked to Create's
+	 * half-segment scheme or to sixteenths, which would multiply the budget by 16 at every extension
+	 * and is a plausible thing for someone to try — Create's own pulley draws a half-rope model, and the
+	 * note in CLAUDE.md about the full-tile braid texture is there because people do touch this.
+	 *
+	 * <p>This is the client cost that a GameTest can reach. That the renderer actually loops over
+	 * {@code segments} is not covered and cannot be from here: a dedicated server refuses to load a
+	 * class mentioning {@code PoseStack}.
+	 */
+	@GameTest(template = "test_rig", timeoutTicks = 100)
+	public static void theCableCostsOnePassPerBlockOfDrop(GameTestHelper helper) {
+		// One more block of drop, exactly one more pass -- across the whole range a battery can reach.
+		for (int blocks = 1; blocks <= 64; blocks++) {
+			int here = CableGeometry.segments(blocks);
+			int below = CableGeometry.segments(blocks - 1);
+			helper.assertTrue(here - below == 1, "a block of drop should cost one pass; going from "
+				+ (blocks - 1) + " to " + blocks + " blocks went from " + below + " to " + here);
+		}
+
+		// A fractional drop costs the same as the whole block containing it, so a weight creeping
+		// downwards does not add passes 16 times a block.
+		helper.assertTrue(CableGeometry.segments(7.01F) == CableGeometry.segments(7.99F),
+			"a fraction of a block must not add a pass: 7.01 gave "
+				+ CableGeometry.segments(7.01F) + ", 7.99 gave " + CableGeometry.segments(7.99F));
+
+		// And the budget at full extension, stated so a change to it is a visible change.
+		int atFullDefaultExtension = 2 + CableGeometry.segments(64F);
+		helper.assertTrue(atFullDefaultExtension == 66,
+			"the per-frame budget at the default maximum cable length should be 66 passes, it is "
+				+ atFullDefaultExtension);
+		helper.succeed();
+	}
+
+	/**
+	 * A battery is drawn while any part of its assembly is in range, not only while the block is.
+	 *
+	 * <p>The renderer used to cover a weight hanging in sight below an out-of-range battery by
+	 * inflating its view distance to 128. That measured to the block, so it moved the boundary instead
+	 * of removing it, and it multiplied by about eight the volume of batteries drawn every frame — which
+	 * matters here because there is no Flywheel visual to take over, so each one costs
+	 * {@code 2 + ceil(offset)} CPU vertex passes a frame.
+	 *
+	 * <p>Both directions are asserted. A distant battery with nothing hanging must be culled at the
+	 * vanilla radius, which is what the old flat 128 got wrong; and a battery whose cable reaches the
+	 * viewer must be drawn even when the block itself is far outside it, which is what a naive
+	 * measure-to-the-block rule at radius 64 would get wrong.
+	 */
+	@GameTest(template = "test_rig", timeoutTicks = 100)
+	public static void cullingFollowsTheWholeAssemblyNotJustTheBlock(GameTestHelper helper) {
+		BlockPos battery = new BlockPos(0, 200, 0);
+		int radius = CableGeometry.VIEW_RADIUS;
+		helper.assertTrue(radius == 64,
+			"the draw radius should be the vanilla 64, not an inflated one; it is " + radius);
+
+		// Right under the battery, nothing hanging: in range.
+		helper.assertTrue(
+			CableGeometry.withinViewRadius(battery, 0F, new Vec3(0.5, 190, 0.5), radius),
+			"a battery 10 blocks overhead must be drawn");
+
+		// Far below it, nothing hanging: out of range, and this is the saving.
+		helper.assertTrue(
+			!CableGeometry.withinViewRadius(battery, 0F, new Vec3(0.5, 100, 0.5), radius),
+			"a battery 100 blocks overhead with no weight must be culled at radius " + radius);
+
+		// Same battery, but the cable now reaches down to the viewer. The block is still 100 blocks
+		// away; the clamp on the end of the cable is 10. It must be drawn.
+		helper.assertTrue(
+			CableGeometry.withinViewRadius(battery, 90F, new Vec3(0.5, 100, 0.5), radius),
+			"the weight is 10 blocks overhead and must be drawn even though its battery is 100 away");
+
+		// A cable that stops short of the viewer stays culled -- the test is the nearest point of the
+		// assembly, not merely whether a long cable exists.
+		helper.assertTrue(
+			!CableGeometry.withinViewRadius(battery, 20F, new Vec3(0.5, 100, 0.5), radius),
+			"a cable reaching only to y=180 must not pull a battery into view at y=100");
+
+		// Horizontal distance is not softened by cable length: the span is vertical.
+		helper.assertTrue(
+			!CableGeometry.withinViewRadius(battery, 90F, new Vec3(100.5, 200, 0.5), radius),
+			"a battery 100 blocks sideways must be culled however long its cable is");
+
+		// And the near edge: just inside and just outside, so the radius is a real boundary.
+		helper.assertTrue(
+			CableGeometry.withinViewRadius(battery, 0F, new Vec3(0.5, 200.5 - 63, 0.5), radius),
+			"63 blocks below the battery is inside radius " + radius);
+		helper.assertTrue(
+			!CableGeometry.withinViewRadius(battery, 0F, new Vec3(0.5, 200.5 - 65, 0.5), radius),
+			"65 blocks below the battery is outside radius " + radius);
+
 		helper.succeed();
 	}
 

@@ -2,6 +2,7 @@ package com.creategravitybatteries.battery;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.Mth;
+import net.minecraft.world.phys.Vec3;
 
 /**
  * Where the pieces of a hanging cable go. Pure arithmetic, deliberately not in the renderer.
@@ -22,6 +23,51 @@ import net.minecraft.util.Mth;
 public final class CableGeometry {
 
 	private CableGeometry() {
+	}
+
+	/**
+	 * How far a battery is drawn from, in blocks. The vanilla default, which is also what Create's own
+	 * kinetic blocks use.
+	 *
+	 * <p>Here rather than in the renderer so it can be pinned by a test: the renderer's
+	 * {@code getViewDistance()} returns this, and a dedicated server cannot load that class. This was
+	 * 128 while the range test measured to the block alone — see
+	 * {@link #withinViewRadius(BlockPos, float, Vec3, int)} for why that was the wrong fix.
+	 */
+	public static final int VIEW_RADIUS = 64;
+
+	/**
+	 * Whether any part of a battery's hanging assembly is within {@code radius} of a viewer — the
+	 * block, the cable, or the clamp on the end of it.
+	 *
+	 * <p>The default {@code shouldRender} asks only about the block's own position, and that is the
+	 * wrong question for a block whose visible extent hangs as far below it as the cable is long: a weight can be in plain sight while the battery holding it is out of range.
+	 * The renderer used to answer that by inflating its view distance to 128, which is the wrong fix
+	 * twice over. It still measured to the block, so it only pushed the boundary out rather than
+	 * removing it — a battery 130 blocks up with its weight beside you still vanished — and it
+	 * quadrupled the radius, and so multiplied by about eight the volume of batteries drawn every
+	 * frame. That volume is expensive here in a way it is not for Create's own pulley: with no Flywheel
+	 * visual to take over, each battery in it costs {@code 2 + ceil(offset)} CPU vertex passes a frame.
+	 *
+	 * <p>Measuring to the nearest point of the assembly instead lets the radius go back to the vanilla
+	 * 64 that Create's own kinetic blocks use, and answers the original question exactly rather than
+	 * approximately.
+	 *
+	 * <p>Out here rather than in the renderer for the same reason the rest of this class is: a GameTest
+	 * runs on a dedicated server, which cannot load a class that mentions {@code PoseStack}.
+	 */
+	public static boolean withinViewRadius(BlockPos batteryPos, float cableLength, Vec3 viewer,
+		int radius) {
+		// The assembly occupies the vertical span from the middle of the battery down to the clamp.
+		// Clamping the viewer's own height into that span gives the nearest point on it.
+		double top = batteryPos.getY() + 0.5;
+		double bottom = top - Math.max(0, cableLength);
+		double nearestY = Mth.clamp(viewer.y, bottom, top);
+
+		double dx = batteryPos.getX() + 0.5 - viewer.x;
+		double dy = nearestY - viewer.y;
+		double dz = batteryPos.getZ() + 0.5 - viewer.z;
+		return dx * dx + dy * dy + dz * dz < (double) radius * radius;
 	}
 
 	/** How many one-block segments to draw for a cable this long. */
