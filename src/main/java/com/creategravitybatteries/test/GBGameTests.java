@@ -22,6 +22,7 @@ import com.simibubi.create.content.kinetics.base.HorizontalAxisKineticBlock;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import com.simibubi.create.content.kinetics.transmission.sequencer.SequencedGearshiftBlockEntity.SequenceContext;
 import com.simibubi.create.content.kinetics.transmission.sequencer.SequencerInstructions;
+import com.simibubi.create.content.redstone.displayLink.DisplayLinkBlockEntity;
 import com.simibubi.create.content.redstone.displayLink.DisplayLinkContext;
 import com.simibubi.create.content.redstone.displayLink.target.DisplayTargetStats;
 import com.simibubi.create.content.redstone.thresholdSwitch.ThresholdSwitchObservable;
@@ -47,6 +48,7 @@ import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.ComparatorBlockEntity;
+import net.minecraft.world.level.block.entity.SignBlockEntity;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.Property;
 import net.minecraft.world.phys.Vec3;
@@ -78,6 +80,14 @@ public class GBGameTests {
 	private static final BlockPos BATTERY_A = new BlockPos(3, SHAFT_Y, 5);
 	private static final BlockPos SHAFT = new BlockPos(4, SHAFT_Y, 5);
 	private static final BlockPos BATTERY_B = new BlockPos(5, SHAFT_Y, 5);
+
+	/**
+	 * North of battery A, for the Display Link test: a link on the battery's north face, and a sign for
+	 * it to write to with a block under the sign to stand it on. Nothing else in the rig reaches z=4 or
+	 * z=3, and a battery only ever consults its neighbours along its own rotation axis.
+	 */
+	private static final BlockPos LINK = new BlockPos(3, SHAFT_Y, 4);
+	private static final BlockPos SIGN = new BlockPos(3, SHAFT_Y + 1, 3);
 
 	/** Where a weight's top layer sits when it is hung in mid-air, and when it starts on the floor. */
 	private static final int HIGH_TOP = 6;
@@ -1032,6 +1042,158 @@ public class GBGameTests {
 		MutableComponent line = lineOf(source, battery, 0);
 		return line.getContents() instanceof TranslatableContents contents ? contents.getKey()
 			: "<not a translatable: " + line.getString() + ">";
+	}
+
+	/**
+	 * A change of state has to reach a Display Board at once, not at the next poll.
+	 *
+	 * <p>A Display Link asks its source for text every {@code getPassiveRefreshTicks()}, and both of
+	 * this mod's sources take Create's default of 100. That is right for the charge, which at the
+	 * defaults moves about 2.6% of a full travel in that time — finer than a board's bar can draw — and
+	 * wrong for the status line, which reports an event: a battery that had flipped to letting down went
+	 * on saying "Winding up" for up to five seconds. Create's answer is
+	 * {@code DisplayLinkBlock.notifyGatherers}, which its own Threshold Switch, Nixie Tube, Station and
+	 * Track Observer all call when their state moves in steps rather than drifting.
+	 *
+	 * <p>Asserted through a real link onto a real sign, because that is the only place the push is
+	 * visible: calling the source directly reports the new state whether or not anything has told the
+	 * link to ask. The link's own timer starts when it is given a source, at tick {@code SETTLE_TICKS},
+	 * so its first passive poll cannot land before tick 112 — and both halves of this read the sign well
+	 * before then. On a build without the push the sign is still reading "winding up".
+	 *
+	 * <p>Two halves, because the two are different call sites. The mode change is
+	 * {@code setMode}; letting go of the weight is {@code disassemble}, which sets the mode by
+	 * direct assignment and so is not covered by the first.
+	 */
+	@GameTest(template = "test_rig", timeoutTicks = 200)
+	public static void aChangeOfStateReachesADisplayLinkAtOnce(GameTestHelper helper) {
+		rig(helper);
+		hangWeight(helper, 3, HIGH_TOP);
+		activate(helper, BATTERY_A);
+		drive(helper);
+		displayLink(helper);
+
+		String[] shown = new String[1];
+		helper.runAfterDelay(SETTLE_TICKS, () -> {
+			GravityBatteryBlockEntity battery = battery(helper, BATTERY_A);
+			helper.assertTrue(battery.getMode() == BatteryMode.CHARGING,
+				"expected to be winding up by now, was " + battery.getMode());
+			linkStatusToSign(helper);
+			shown[0] = signLine(helper);
+			helper.assertTrue(!shown[0].isEmpty(),
+				"the link wrote nothing to the sign, so this test is watching nothing");
+		});
+
+		// Take the drive away. The battery is then the only thing on the network that can turn the
+		// shaft, so it flips out of CHARGING within a tick or two of the motor going.
+		helper.runAfterDelay(SETTLE_TICKS + 8, () -> helper.setBlock(MOTOR, Blocks.AIR));
+
+		helper.runAfterDelay(SETTLE_TICKS + 23, () -> {
+			GravityBatteryBlockEntity battery = battery(helper, BATTERY_A);
+			helper.assertTrue(battery.getMode() != BatteryMode.CHARGING,
+				"the motor is gone and the battery is still winding up, so there is no change to see");
+			shown[0] = assertSignFollowed(helper, battery, shown[0], "the mode changed");
+		});
+
+		// And the other call site: a right-click that lets the weight go moves both the mode and the
+		// reason, and it does it without going through setMode.
+		helper.runAfterDelay(SETTLE_TICKS + 28, () -> activate(helper, BATTERY_A));
+
+		helper.runAfterDelay(SETTLE_TICKS + 43, () -> {
+			GravityBatteryBlockEntity battery = battery(helper, BATTERY_A);
+			helper.assertTrue(!battery.running && battery.getIdleReason() == IdleReason.NO_WEIGHT,
+				"the weight should have been let go, the battery says " + battery.getMode() + "/"
+					+ battery.getIdleReason());
+			assertSignFollowed(helper, battery, shown[0], "the weight was let go");
+			helper.succeed();
+		});
+	}
+
+	/**
+	 * The idle <em>reason</em> is the other half of what the status source reports, and it moves without
+	 * the mode moving — so it is a third call site, {@code idle}, and nothing above reaches it.
+	 *
+	 * <p>The transition is one block: a spent battery over a shaft is idle because it is DISCHARGED,
+	 * and with the shaft gone there is nothing worth spending charge into, so the same idle battery is
+	 * idle because it is NOT_TURNING. The mode is IDLE on both sides of that.
+	 */
+	@GameTest(template = "test_rig", timeoutTicks = 200)
+	public static void anIdleReasonChangeReachesADisplayLinkToo(GameTestHelper helper) {
+		rig(helper);
+		// On the floor with no motor: idle, spent, and something on the shaft worth driving.
+		hangWeight(helper, 3, RESTING_TOP);
+		activate(helper, BATTERY_A);
+		displayLink(helper);
+
+		String[] shown = new String[1];
+		helper.runAfterDelay(SETTLE_TICKS, () -> {
+			GravityBatteryBlockEntity battery = battery(helper, BATTERY_A);
+			helper.assertTrue(battery.getMode() == BatteryMode.IDLE
+				&& battery.getIdleReason() == IdleReason.DISCHARGED,
+				"expected to be idle and spent, was " + battery.getMode() + "/"
+					+ battery.getIdleReason());
+			linkStatusToSign(helper);
+			shown[0] = signLine(helper);
+		});
+
+		helper.runAfterDelay(SETTLE_TICKS + 8, () -> helper.setBlock(SHAFT, Blocks.AIR));
+
+		helper.runAfterDelay(SETTLE_TICKS + 23, () -> {
+			GravityBatteryBlockEntity battery = battery(helper, BATTERY_A);
+			helper.assertTrue(battery.getMode() == BatteryMode.IDLE,
+				"this half only means something while the mode holds still, it is " + battery.getMode());
+			helper.assertTrue(battery.getIdleReason() == IdleReason.NOT_TURNING,
+				"with the shaft gone the reason should be NOT_TURNING, it is " + battery.getIdleReason());
+			assertSignFollowed(helper, battery, shown[0], "the idle reason changed");
+			helper.succeed();
+		});
+	}
+
+	/**
+	 * The sign has to read something new, and it has to read the right something: a push that fired but
+	 * carried the wrong line, or a line that changed for some reason other than the push, both pass the
+	 * first assertion alone.
+	 */
+	private static String assertSignFollowed(GameTestHelper helper, GravityBatteryBlockEntity battery,
+		String before, String because) {
+		String now = signLine(helper);
+		helper.assertTrue(!now.equals(before),
+			"the sign still reads '" + now + "' fifteen ticks after " + because);
+		String expected = lineOf(GBDisplaySources.BATTERY_STATUS.get(), battery, 0).getString();
+		helper.assertTrue(now.equals(expected),
+			"the sign reads '" + now + "' and the source now says '" + expected + "'");
+		return now;
+	}
+
+	/**
+	 * A Display Link on battery A's north face with a sign for it to write to, and a block under the
+	 * sign to stand it on.
+	 *
+	 * <p>FACING points from the source block to the link, which is what {@code getDirection()} reverses
+	 * to find its source — so a link north of the battery faces north.
+	 */
+	private static void displayLink(GameTestHelper helper) {
+		helper.setBlock(LINK, AllBlocks.DISPLAY_LINK.getDefaultState()
+			.setValue(BlockStateProperties.FACING, Direction.NORTH));
+		helper.setBlock(SIGN.below(), Blocks.STONE);
+		helper.setBlock(SIGN, Blocks.OAK_SIGN);
+	}
+
+	/** What configuring the link in its own UI would do, and one gather to prime the sign. */
+	private static void linkStatusToSign(GameTestHelper helper) {
+		DisplayLinkBlockEntity link = helper.getBlockEntity(LINK);
+		link.activeSource = GBDisplaySources.BATTERY_STATUS.get();
+		// Absolute, because target() stores the offset from the link's own world position.
+		link.target(helper.absolutePos(SIGN));
+		link.updateGatheredData();
+	}
+
+	/** The first line of the front of the sign the Display Link writes to. */
+	private static String signLine(GameTestHelper helper) {
+		SignBlockEntity sign = helper.getBlockEntity(SIGN);
+		return sign.getFrontText()
+			.getMessage(0, false)
+			.getString();
 	}
 
 	// --- what the goggles report ------------------------------------------------------------------

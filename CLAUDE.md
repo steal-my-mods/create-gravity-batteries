@@ -274,6 +274,21 @@ mappings, so the output uses the same names the code here compiles against.
 - **A Display Link source's name comes from its registry id**, as
   `<namespace>.display_source.<path>`, and appears in nothing that looks like a translation call. It is
   in `check_lang.py`'s coverage for that reason.
+- **A Display Link polls its source every 100 ticks, and for the status line that was five seconds of
+  lying.** `DisplaySource.getPassiveRefreshTicks()` defaults to 100 and neither source overrides it,
+  which is right for the charge — 100 ticks is about 2.6% of a full travel at the defaults, and a bar
+  cell on a Display Board is several percent wide, so the bar cannot show a finer poll — and wrong for
+  the mode, which is a discrete event. `DisplayLinkBlock.notifyGatherers` is Create's push, used by its
+  own Threshold Switch, Nixie Tube, Station and Track Observer for exactly this. `refreshDisplayLinks()`
+  calls it from the three places that already gate on the displayed value having moved: `setMode`,
+  `idle` (the reason is the other half of what the status source shows, and it moves without the mode
+  moving) and `disassemble` (which sets both by direct assignment, so `setMode` does not cover it).
+  **Keep it to sites that already gate**, because a push resets the link's own timer — pushing on charge
+  movement would turn one poll every five seconds into one every tick, per link, for a bar that cannot
+  show the difference. `aChangeOfStateReachesADisplayLinkAtOnce` and
+  `anIdleReasonChangeReachesADisplayLinkToo` lock all three sites, each verified to fail on its own
+  mutation, and they go through a real link onto a real sign because calling the source directly reports
+  the new state whether or not anything told the link to ask.
 - **A battery ignores a Sequenced Gearshift, and half-obeying one was worse than either.**
   `LinearActuatorBlockEntity` accepts a `TURN_DISTANCE` instruction as a travel limit, counts it down
   against every tick of movement, and once it is spent sets `locked` — which forces a re-sync and a hard

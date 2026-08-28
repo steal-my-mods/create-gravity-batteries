@@ -12,6 +12,7 @@ import com.simibubi.create.content.contraptions.piston.LinearActuatorBlockEntity
 import com.simibubi.create.content.kinetics.KineticNetwork;
 import com.simibubi.create.content.kinetics.base.IRotate;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
+import com.simibubi.create.content.redstone.displayLink.DisplayLinkBlock;
 import com.simibubi.create.content.redstone.thresholdSwitch.ThresholdSwitchObservable;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import com.simibubi.create.foundation.blockEntity.behaviour.CenteredSideValueBoxTransform;
@@ -463,6 +464,35 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 	}
 
 	/**
+	 * Tells any attached Display Link that what it would show has changed.
+	 *
+	 * <p>A Display Link polls its source every {@code getPassiveRefreshTicks()}, which is Create's
+	 * default of 100 ticks for both of this mod's sources. That is fine for the charge, which moves far
+	 * more slowly than a board can render it — 100 ticks is about 2.6% of a full travel at the defaults,
+	 * and a bar cell on a Display Board is several percent wide — and wrong for the status line, which
+	 * reports a discrete event: a battery that had flipped to letting down went on saying "Winding up"
+	 * for up to five seconds. {@code notifyGatherers} is Create's answer to that, and its own blocks
+	 * whose state changes in steps rather than drifting — the Threshold Switch, the Nixie Tube, a
+	 * Station, a Track Observer — all call it for exactly this reason.
+	 *
+	 * <p>Called from the three places that <em>already</em> gate on the displayed value having changed
+	 * and nowhere else: {@link #setMode}, {@link #idle} and {@link #disassemble}. Each of those already
+	 * pays for a {@link #sendData()} on the same condition, so this adds no case of its own — and it has
+	 * to stay that way, because a push resets the link's own refresh timer. Notifying on charge movement
+	 * would turn one poll every five seconds into one every tick, per link, and the bar it fed would not
+	 * be able to show the difference.
+	 *
+	 * <p>Server side only, like {@link #refreshComparator}: every caller sits behind the client
+	 * early-out. Note Create's {@code forEachAttachedGatherer} reads all six neighbours with no
+	 * {@code isLoaded} guard, so at the edge of the loaded area this can force-load a chunk — the same
+	 * read that {@link #hasSomethingToDrive} does have to guard, and tolerable here only because state
+	 * changes are rare where a tick is not.
+	 */
+	private void refreshDisplayLinks() {
+		DisplayLinkBlock.notifyGatherers(level, worldPosition);
+	}
+
+	/**
 	 * Puts the battery's rotation back if something took it away without telling it.
 	 *
 	 * <p>Create re-arms a generator that has been detached by setting {@code reActivateSource}, and
@@ -527,10 +557,16 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 		return idle(IdleReason.NO_SURPLUS);
 	}
 
+	/**
+	 * Idle, and why. The reason is half of what a Display Board shows — the status source reports it in
+	 * place of the word "Holding" — so a reason that has moved is a changed readout even though the mode
+	 * has not moved, and it gets the same push {@link #setMode} does.
+	 */
 	private BatteryMode idle(IdleReason reason) {
 		if (idleReason != reason) {
 			idleReason = reason;
 			sendData();
+			refreshDisplayLinks();
 		}
 		return BatteryMode.IDLE;
 	}
@@ -616,6 +652,7 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 		refreshKineticContribution();
 		setChanged();
 		sendData();
+		refreshDisplayLinks();
 	}
 
 	/**
@@ -794,8 +831,14 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 		// Not through setMode: on the removal path the network is already being torn down by
 		// KineticBlockEntity#remove, and re-declaring a speed into it there is how you get a ghost
 		// source left behind on the network.
-		if (!remove && !level.isClientSide)
+		if (!remove && !level.isClientSide) {
 			refreshKineticContribution();
+			// Letting go of a weight moves both halves of what a board reports, and by direct
+			// assignment rather than through setMode, so the push has to be made here too. Not on the
+			// removal path: this block is leaving, and a link whose source block has gone finds that
+			// out for itself.
+			refreshDisplayLinks();
+		}
 		sendData();
 	}
 
