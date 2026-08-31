@@ -32,10 +32,16 @@ a lone battery on a network behaves exactly as it did.
   play: attaching a bare shaft to a charged battery span it up and it lowered its weight to the floor
   driving nothing. A cogwheel did it too, and so did a *disengaged* clutch. The guard that was supposed
   to prevent this asked whether a shaft was attached, which is a much weaker question than whether
-  anything wants power; it now measures the stress the network would actually draw. A battery holding
-  for this reason says "Nothing needs power" rather than reporting the shaft as unpowered. This is not
-  a change to how a battery behaves under *partial* load — it still supplies its full rating, and
-  sizing the weight to the shortfall is still the player's job.
+  anything wants power. A battery holding for this reason says "Nothing needs power" rather than
+  reporting the shaft as unpowered. This is not a change to how a battery behaves under *partial* load
+  — it still supplies its full rating, and sizing the weight to the shortfall is still the player's job.
+- **`c:kinetic_relay` is how it tells a load from a pipe, and packs can extend it.** The tag lists the
+  blocks that do nothing but pass rotation along — shafts, cogwheels, gearboxes, clutches, gearshifts,
+  chain drives, the encased variants, the gauges — and everything not in it counts as worth driving, so
+  a block from a mod this one has never heard of gets driven rather than ignored. Add your own relay
+  with a datapack. Stress is deliberately *not* the test: Create gives belts, Gantry Shafts and
+  flywheels an impact of exactly zero, so a battery keyed on stress would have refused to drive a belt
+  network — the most ordinary load in the game.
 - Goggles distinguish the two shortfalls: a battery that will not wind because the surplus is
   *borrowed* now says so, instead of blaming a network that a Stressometer says has plenty spare.
 
