@@ -5,7 +5,7 @@ import java.util.Locale;
 /**
  * Why an idle battery is idle. Diagnostic only — nothing branches on it. It exists because "nothing
  * is happening" is the single most confusing state a self-deciding machine can be in, and the goggles
- * are the only place a player can be told which of six different nothings this one is.
+ * are the only place a player can be told which of eight different nothings this one is.
  */
 public enum IdleReason {
 

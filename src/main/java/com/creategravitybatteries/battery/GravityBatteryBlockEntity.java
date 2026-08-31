@@ -169,8 +169,9 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 	/**
 	 * The last answer {@link #restingOnSomething()} gave, with the tick and offset it was measured at.
 	 *
-	 * <p>Two call sites reach {@link #canDescend()} in one tick and neither can see the other — the
-	 * reprobe condition in {@link #tick()} and the discharge branch of {@link #decideMode()} — so a
+	 * <p>Three call sites reach {@link #canDescend()} in one tick and none can see the others — the
+	 * reprobe condition in {@link #tick()}, the discharge branch of {@link #decideMode()}, and the
+	 * NOTHING_TO_DRIVE branch beneath it — so a
 	 * weight resting on the floor with the network in deficit walked the colliders twice every tick,
 	 * for as long as the base stayed dark. Measured at 2.00 probes a tick in that state, against 1.00
 	 * while descending and 0.00 either side of charging.
@@ -733,17 +734,23 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 	 *
 	 * <p><b>Measured every tick, and a cache was tried and taken out.</b> This is gated by the
 	 * {@code &&} chain in {@code decideMode} — it only runs when nothing else on the network is a source
-	 * and nothing else is supplying capacity — and it stops at the first block that draws anything. A
-	 * 20-tick cache looked like an obvious win and was actively wrong: the first call lands the tick
-	 * after the warm-up, before the rotation propagator has finished, so it cached "nothing to drive"
-	 * from an incomplete picture and held it for a second. A reading this cheap is not worth a
-	 * staleness window over the one moment the answer is guaranteed to be wrong.
+	 * and nothing else is supplying capacity — and it stops at the first block worth driving. Note it
+	 * only stops early when the answer is <em>yes</em>: with nothing to drive it exhausts the component,
+	 * up to {@link #DEMAND_WALK_LIMIT}, and that is the steady state a battery holding station on a dead
+	 * shaft sits in. The component is a handful of blocks in the case that actually provoked this, so
+	 * the cap is the cost control rather than a cache. A 20-tick cache was tried and was actively
+	 * wrong: the first call lands the tick after the warm-up, before the rotation propagator has
+	 * finished, so it cached "nothing to drive" from an incomplete picture and held it for a second.
+	 * Seven GameTests failed on it. If this ever needs a cache it has to be invalidated by the network
+	 * changing shape, not by a timer.
 	 *
-	 * <p>No {@code isLoaded} guard is needed any more, and the hazard it protected against is gone
-	 * rather than merely handled: this reads {@code getBlockState()} off block entities already in the
-	 * network's member map, which is a cached field on a loaded block entity, instead of asking a
-	 * {@code ServerLevel} for arbitrary neighbour positions and force-loading a chunk per tick at the
-	 * edge of the loaded area.
+	 * <p>The {@code hasNetwork()} branch needs no {@code isLoaded} guard, because it reads
+	 * {@code getBlockState()} off block entities already in the member map — a cached field on a loaded
+	 * block entity. <b>The walk still needs one</b>, and still has three, because it asks the level
+	 * about arbitrary neighbour positions: {@code Level#getBlockState} on a {@code ServerLevel} goes
+	 * through {@code getChunk} with force-load true, so a battery at the edge of the loaded area would
+	 * pull a chunk per tick. Do not delete those guards on the strength of this paragraph — a GameTest
+	 * rig has no chunk edge and nothing would fail.
 	 */
 	private boolean hasSomethingToDrive() {
 		if (level == null)
@@ -751,8 +758,8 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 		// A network exists exactly when something is turning, so this is the branch taken while the
 		// battery is already carrying the base. The member map is authoritative and needs no walking.
 		if (hasNetwork()) {
-			for (Map.Entry<KineticBlockEntity, Float> entry : getOrCreateNetwork().members.entrySet())
-				if (wantsPower(entry.getKey(), entry.getValue()))
+			for (KineticBlockEntity member : getOrCreateNetwork().members.keySet())
+				if (wantsPower(member))
 					return true;
 			return false;
 		}
@@ -760,19 +767,37 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 	}
 
 	/**
-	 * Whether one member is a load worth descending for.
+	 * Whether one member is worth descending for.
 	 *
-	 * <p>The impact test comes before the tag lookup because a shaft, a cogwheel, a gearbox and a
-	 * clutch all sit at zero, and on any real network they are most of the blocks.
+	 * <p><b>Classified, not measured, and the measured version was a regression.</b> The first cut of
+	 * this asked whether the block draws stress, which reads as obviously right and is wrong: Create
+	 * registers {@code belt} with {@code setNoImpact}, and {@code gantry_shaft}, {@code flywheel} and
+	 * {@code display_board} are all zero too. A belt network is the most ordinary load in the game and
+	 * draws nothing at all, so a battery keyed on stress would have sat and watched a base go dark
+	 * while still spinning up for a bare shaft — which draws nothing either. Stress tells you how
+	 * <em>big</em> a load is, not whether something is a load.
+	 *
+	 * <p>So the question is asked the other way round, against {@link GBTags#KINETIC_RELAY}: is this
+	 * block nothing but a pipe for rotation? Everything else counts, which is the safe default — an
+	 * unknown block gets driven, exactly as it did before this guard existed.
 	 *
 	 * <p>Stores are skipped for the same reason their capacity is — see
 	 * {@link #storedCapacityOnNetwork()}. A battery must not spend its charge funding another store's
-	 * charging, so demand from anything in {@link GBTags#KINETIC_ENERGY_STORAGE} is not demand worth
-	 * descending for.
+	 * charging, so a store is not demand worth descending for.
+	 *
+	 * <p>Reads nothing but the block state, deliberately. An earlier version called
+	 * {@code calculateStressApplied()} on each member, which is not a query: it assigns
+	 * {@code lastStressApplied}, a field Create persists as {@code AddedStress} and re-seeds the network
+	 * from through {@code addSilently}. A predicate that is supposed to observe the network was writing
+	 * to every block it touched, and for another battery — whose figure is mode-dependent — it was
+	 * corrupting the exact "recorded, not fresh" value that makes
+	 * {@link #networkStressWithoutSelf()} exact.
 	 */
-	private boolean wantsPower(KineticBlockEntity member, float impact) {
-		return member != this && !member.isRemoved() && impact > 0
-			&& !member.getBlockState().is(GBTags.KINETIC_ENERGY_STORAGE);
+	private boolean wantsPower(KineticBlockEntity member) {
+		if (member == this || member.isRemoved())
+			return false;
+		BlockState state = member.getBlockState();
+		return !state.is(GBTags.KINETIC_RELAY) && !state.is(GBTags.KINETIC_ENERGY_STORAGE);
 	}
 
 	/**
@@ -809,7 +834,7 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 			if (++visited > DEMAND_WALK_LIMIT)
 				return true;
 			KineticBlockEntity current = queue.poll();
-			if (current != this && wantsPower(current, current.calculateStressApplied()))
+			if (wantsPower(current))
 				return true;
 			for (KineticBlockEntity neighbour : connectedNeighboursOf(current))
 				if (seen.add(neighbour.getBlockPos()))
@@ -847,12 +872,6 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 				found.add(neighbour);
 		}
 		return found;
-	}
-
-	private Direction.Axis getRotationAxisOfThis() {
-		BlockState state = getBlockState();
-		return state.getBlock() instanceof IRotate rotate ? rotate.getRotationAxis(state)
-			: Direction.Axis.X;
 	}
 
 	private void setMode(BatteryMode next) {
@@ -1388,7 +1407,8 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 						CreateLang.number(getChargeDraw())
 							.translate("generic.unit.stress"),
 						CreateLang
-							.number(Math.max(0, networkCapacityWithoutSelf() - networkStressWithoutSelf()))
+							.number(Math.max(0, networkCapacityWithoutSelf() - networkStressWithoutSelf()
+								- storedCapacityOnNetwork()))
 							.translate("generic.unit.stress"))
 					.style(ChatFormatting.DARK_GRAY)
 					.forGoggles(tooltip, 1);

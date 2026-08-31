@@ -138,9 +138,9 @@ mappings, so the output uses the same names the code here compiles against.
   answer: a one-step `isCollidingWithWorld` against the block actually below. Cheap enough per tick,
   because the *walk* still only runs when the cached figure has been shown to be wrong.
   `clearingTheFloorLetsTheWeightCarryOnDown` fails on the old comparison.
-- **`restingOnSomething()` is measured once a tick, not once a caller.** Two call sites reach
-  `canDescend()` in the same tick and neither can see the other: the reprobe condition in `tick()` and
-  the discharge branch of `decideMode()`. Both are live in the state a discharged battery sits in for
+- **`restingOnSomething()` is measured once a tick, not once a caller.** Three call sites reach
+  `canDescend()` in the same tick and none can see the others: the reprobe condition in `tick()`, the
+  discharge branch of `decideMode()`, and the NOTHING_TO_DRIVE branch beneath it. Both are live in the state a discharged battery sits in for
   as long as the base is dark, so a weight resting on the floor walked the collider set twice every
   tick — measured at 2.00 probes a tick there, against 1.00 while descending and 0.00 either side of
   charging. The walk is Create's `isCollidingWithWorld` over the weight's *bottom footprint*, so it is
@@ -177,12 +177,30 @@ mappings, so the output uses the same names the code here compiles against.
   connections — and `RotationPropagator.isConnected` for the edge test. Composing those two gives a
   walk that agrees with the propagator by construction. Do not hand-roll the connection rules instead;
   cogwheel meshing and large-to-small gearing are not guessable.
-- **Latent impact, never `networkStressWithoutSelf()`.** Create scales stress by speed —
-  `getActualStressOf` multiplies the recorded impact by `|getTheoreticalSpeed()|` — so on a network
-  nothing is turning, every member reports zero stress however much machinery is bolted to it. Testing
-  the stress total would have read "no load" at exactly the moment a battery is deciding whether to
-  take over, and failover would never have happened again. `calculateStressApplied()` is a flat lookup
-  of the block's impact and does not depend on speed, which is why the walk asks each block that.
+- **Stress cannot answer "is this a load", and a build that thought it could shipped for one review
+  cycle.** Two separate reasons, and the second one is the killer. First, Create scales stress by speed:
+  `getActualStressOf` multiplies the recorded impact by `|getTheoreticalSpeed()|`, so on a network
+  nothing is turning every member reports zero however much machinery is attached — testing the stress
+  *total* reads "no load" at exactly the moment a store decides whether to take over, and failover
+  never happens again. Second, and worse: **`belt` is registered `setNoImpact`**, and so are
+  `gantry_shaft`, `flywheel` and `display_board`. A belt network is the most ordinary load in Create
+  and draws exactly zero, so even the per-block impact is not a load test — a battery keyed on it sat
+  and watched a base go dark while still spinning up for a bare shaft. Stress tells you how *big* a
+  load is, never whether something is one.
+- **So `c:kinetic_relay` asks the question backwards, and is deliberately default-allow.** The tag
+  lists the blocks that do nothing but pass rotation along — shaft, cogwheel, gearbox, clutch,
+  gearshift, chain drive, the encased variants, the gauges — and everything not in it counts as worth
+  driving. That direction is the whole point: a block this mod has never heard of gets driven, exactly
+  as it did before the guard existed, so the failure mode is the old behaviour rather than a base that
+  will not run. `gantry_shaft` and `powered_shaft` are deliberately *not* relays. A pack or another
+  addon adds its own relay with a datapack.
+- **The demand predicate reads block states and nothing else, and that is a correctness rule.** An
+  earlier version called `calculateStressApplied()` on each member to get its impact. That is not a
+  query: it assigns `lastStressApplied`, which Create persists as the `AddedStress` NBT key and re-seeds
+  the network from through `addSilently`. So a predicate meant to *observe* the network was writing to
+  every block it visited, and for another battery — whose figure is mode-dependent — it was corrupting
+  the "recorded, not fresh" value that makes `networkStressWithoutSelf()` exact. Never call a
+  `calculate*` method on a block you do not own.
 - **The demand walk is measured every tick, and a cache was tried and taken out.** It is gated by the
   `&&` chain in `decideMode` — it only runs when nothing else is a source and nothing else supplies
   capacity — and it stops at the first block that draws anything. A 20-tick cache looked like an
@@ -788,6 +806,23 @@ Nothing above is built beyond route 1. Route 3 is what to reach for if the Flywh
 attempted, because that is the change whose whole point is a number no current test can see.
 
 ## Known gaps
+
+- **`storedCapacityOnNetwork()` cannot see a store's capacity while Create is holding it in
+  `unloadedCapacity`, and that window is real.** `KineticNetwork.calculateCapacity` returns the sum over
+  *loaded* sources plus `unloadedCapacity`, which `initFromTE` seeds from the network's saved totals. The
+  scan walks `sources`, so in the window after a world or chunk load — before every member has
+  re-registered — a tagged store's contribution is inside `capacity` and is not subtracted, and a
+  battery can wind up on borrowed capacity for exactly the case the tag forbids. Not fixable from
+  outside Create: `unloadedCapacity` is a single float with no per-block breakdown, so there is nothing
+  to attribute. Bounded by how long the propagator takes to reattach, and it fails towards over-charging
+  rather than towards a stalled base. Found by review, not by a test, and no test can reach it without a
+  save/load cycle mid-GameTest.
+- **The `isRemoved()` skip in that scan fails in the permissive direction, not the one its comment
+  claims.** Create prunes a stale source when `level.getBlockEntity(pos) != be`, never on `isRemoved()`,
+  so between a store's removal and the next `updateCapacity()` its capacity is still counted in
+  `capacity` while the scan has already stopped subtracting it. That is over-permissive for a tick or
+  two, not the double-subtraction the comment describes. Matching Create's own test would cost a chunk
+  lookup per source per tick.
 
 - **The item model is the block model.** It shows the casing and the spool but no shaft, because the
   shaft is drawn by the renderer. Create authors a separate `item.json` with the shaft baked in; doing

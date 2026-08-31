@@ -19,6 +19,7 @@ import com.creategravitybatteries.registry.GBTags;
 import com.simibubi.create.AllBlocks;
 import com.simibubi.create.api.behaviour.display.DisplaySource;
 import com.simibubi.create.api.contraption.BlockMovementChecks;
+import com.simibubi.create.api.stress.BlockStressValues;
 import com.simibubi.create.content.kinetics.base.HorizontalAxisKineticBlock;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import com.simibubi.create.content.kinetics.transmission.sequencer.SequencedGearshiftBlockEntity.SequenceContext;
@@ -394,6 +395,14 @@ public class GBGameTests {
 		helper.setBlock(BATTERY_B, GBBlocks.GRAVITY_BATTERY.get()
 			.defaultBlockState()
 			.setValue(HorizontalAxisKineticBlock.HORIZONTAL_AXIS, Direction.Axis.X));
+		// Something for whichever battery gets there first to actually drive, east of battery B. Two
+		// batteries and a shaft are a network that asks for nothing -- both are stores, and the shaft is
+		// a relay -- so without this neither ever leaves IDLE and every assertion below passes on a
+		// build with storedCapacityOnNetwork() deleted. Caught in review, not by the suite.
+		helper.setBlock(new BlockPos(6, SHAFT_Y, 5), AllBlocks.SHAFT.getDefaultState()
+			.setValue(BlockStateProperties.AXIS, Direction.Axis.X));
+		helper.setBlock(new BlockPos(7, SHAFT_Y, 5), AllBlocks.ENCASED_FAN.getDefaultState()
+			.setValue(BlockStateProperties.FACING, Direction.EAST));
 		hangWeight(helper, 3, HIGH_TOP);
 		hangWeight(helper, 5, HIGH_TOP);
 		activate(helper, BATTERY_A);
@@ -405,12 +414,15 @@ public class GBGameTests {
 
 		List<String> pumping = new ArrayList<>();
 		List<Float> sums = new ArrayList<>();
+		boolean[] everDischarged = new boolean[1];
 		for (int tick = SETTLE_TICKS + 10; tick < 280; tick += 10) {
 			int at = tick;
 			helper.runAfterDelay(at, () -> {
 				GravityBatteryBlockEntity a = battery(helper, BATTERY_A);
 				GravityBatteryBlockEntity b = battery(helper, BATTERY_B);
 				sums.add(a.offset + b.offset);
+				if (a.getMode() == BatteryMode.DISCHARGING || b.getMode() == BatteryMode.DISCHARGING)
+					everDischarged[0] = true;
 				if (opposed(a.getMode(), b.getMode()))
 					pumping.add("t=" + at + " A=" + a.getMode() + " B=" + b.getMode());
 			});
@@ -418,6 +430,11 @@ public class GBGameTests {
 
 		helper.runAfterDelay(300, () -> {
 			helper.assertTrue(!sums.isEmpty(), "nothing was sampled");
+			// Without this the rest passes on a rig where neither battery ever did anything, which is
+			// exactly what happened when the demand guard landed and this test went quietly vacuous.
+			helper.assertTrue(everDischarged[0],
+				"neither battery ever let its weight down, so nothing was ever on offer for the other "
+					+ "to wind up on and this test proved nothing");
 			helper.assertTrue(pumping.isEmpty(),
 				"one battery wound up on the other's output: " + pumping);
 			for (float sum : sums)
@@ -983,8 +1000,12 @@ public class GBGameTests {
 		// draws a Stress Unit.
 		helper.setBlock(BATTERY_B, AllBlocks.COGWHEEL.getDefaultState()
 			.setValue(BlockStateProperties.AXIS, Direction.Axis.X));
+		// Powered, i.e. disengaged, which is the shape that was actually reported: a disengaged clutch
+		// splits the network, so what refuses here is the walk's edge test rather than the relay tag.
+		// The default state is engaged and would only have exercised a third relay.
 		helper.setBlock(new BlockPos(6, SHAFT_Y, 5), AllBlocks.CLUTCH.getDefaultState()
-			.setValue(BlockStateProperties.AXIS, Direction.Axis.X));
+			.setValue(BlockStateProperties.AXIS, Direction.Axis.X)
+			.setValue(BlockStateProperties.POWERED, true));
 		hangWeight(helper, 3, HIGH_TOP);
 		activate(helper, BATTERY_A);
 
@@ -1015,6 +1036,45 @@ public class GBGameTests {
 			helper.assertTrue(battery.getIdleReason() == IdleReason.NOTHING_TO_DRIVE,
 				"a battery holding because nothing wants power should say so rather than report the "
 					+ "shaft as unpowered; it says " + battery.getIdleReason());
+			helper.succeed();
+		});
+	}
+
+	/**
+	 * A load that draws no stress is still a load.
+	 *
+	 * <p>The companion to {@link #aChargedBatteryOnABareShaftStaysPut}, and it exists because the first
+	 * version of that guard measured stress impact and was a regression. Create registers {@code belt}
+	 * with {@code setNoImpact}; so are {@code gantry_shaft}, {@code flywheel} and {@code display_board}.
+	 * A belt network is the most ordinary load in the game and draws exactly zero, so a battery keyed on
+	 * impact would sit and watch a base go dark — while still spinning up for a bare shaft, which draws
+	 * zero as well. Stress says how <em>big</em> a load is, never whether something is one.
+	 *
+	 * <p>A Gantry Shaft rather than a belt because it is one block and one state: belts need a pulley at
+	 * each end, and the point here is the classification, not the machine. It is zero impact and it is
+	 * not in {@code c:kinetic_relay}, which is exactly the combination that used to fail.
+	 */
+	@GameTest(template = "test_rig", timeoutTicks = 200)
+	public static void aLoadThatDrawsNoStressIsStillALoad(GameTestHelper helper) {
+		rig(helper);
+		helper.setBlock(BATTERY_B, AllBlocks.SHAFT.getDefaultState()
+			.setValue(BlockStateProperties.AXIS, Direction.Axis.X));
+		helper.setBlock(new BlockPos(6, SHAFT_Y, 5), AllBlocks.GANTRY_SHAFT.getDefaultState()
+			.setValue(BlockStateProperties.FACING, Direction.EAST));
+		hangWeight(helper, 3, HIGH_TOP);
+		activate(helper, BATTERY_A);
+
+		helper.runAfterDelay(SETTLE_TICKS + 30, () -> {
+			GravityBatteryBlockEntity battery = battery(helper, BATTERY_A);
+			helper.assertTrue(battery.getWeightBlocks() == WEIGHT_BLOCKS,
+				"the rig should have given it a four block weight, it has " + battery.getWeightBlocks());
+			helper.assertTrue(
+				BlockStressValues.getImpact(AllBlocks.GANTRY_SHAFT.get()) == 0,
+				"this test is pointless unless a Gantry Shaft still draws no stress; Create now says "
+					+ BlockStressValues.getImpact(AllBlocks.GANTRY_SHAFT.get()));
+			helper.assertTrue(battery.getMode() == BatteryMode.DISCHARGING,
+				"a zero-impact load is still a load and the battery should be carrying it; it is "
+					+ battery.getMode() + "/" + battery.getIdleReason());
 			helper.succeed();
 		});
 	}
@@ -1266,8 +1326,10 @@ public class GBGameTests {
 				"the link wrote nothing to the sign, so this test is watching nothing");
 		});
 
-		// Take the drive away. The battery is then the only thing on the network that can turn the
-		// shaft, so it flips out of CHARGING within a tick or two of the motor going.
+		// Take the drive away. The battery stops charging within a tick or two either way -- there is no
+		// surplus left to wind on -- so this asserts only that it leaves CHARGING, not what it goes to.
+		// Whether it takes over depends on whether anything on the network wants driving, which is
+		// aChargedBatteryOnABareShaftStaysPut's subject rather than this one's.
 		helper.runAfterDelay(SETTLE_TICKS + 8, () -> helper.setBlock(MOTOR, Blocks.AIR));
 
 		helper.runAfterDelay(SETTLE_TICKS + 23, () -> {
