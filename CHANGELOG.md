@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.1.1
+
+One balance fix and the cross-mod convention that generalises it. An 0.1.0 world loads unchanged, and
+a lone battery on a network behaves exactly as it did.
+
+- **A battery no longer winds up on capacity another store is supplying.** The round-trip loss makes
+  it impossible for a battery to fund an equal or heavier one -- winding costs `weight / efficiency`
+  and letting down pays `weight` -- and that was mistaken for the whole guarantee. A *lighter* battery
+  costs less than a heavier one supplies, so it was funded. Measured at the defaults: a six block
+  weight filled two three block ones and then spent the rest of itself into a bare shaft. Not
+  perpetual motion, since the transfer loses on the way up like any other winding, but a battery's
+  charge is the player's to spend and nothing should be able to move it uninvited. Capacity supplied
+  by a store is now taken out of the *charging* test only; a battery deciding whether to let its own
+  weight down goes on counting it, because a discharging store really is holding the network up.
+- **`c:kinetic_energy_storage`, a tag any Create addon can honour.** The rule above is not about
+  Gravity Batteries, it is about stores, so it is keyed on a tag rather than on this mod's own class:
+  any block in `c:kinetic_energy_storage` is treated as spending a store rather than generating, and
+  Create already reports how much and whether it is doing it right now. Create: CAES honours it from
+  0.1.3, so the two mods leave each other's charge alone; a pack author can add a third mod's block
+  with a datapack and fix an interaction neither author has heard of.
+- **`roundTripEfficiency` now defaults to 1.0 — a battery gives back exactly what it took in.** It was
+  0.75, on the belief that the loss was what stopped one battery charging another. It never was, and
+  the tag above does that properly and at any setting, which frees this number to be a balance dial.
+  Create charges nothing for a water wheel, a belt or a gearbox, and buffering peaks instead of
+  overbuilding generation is the reason to install a battery at all, so a storage tax was charging for
+  the feature. The knob is still there for packs that want storage to cost something. **Existing worlds
+  keep 0.75**, because the value is already written to their server config — delete the line, or set it
+  to 1.0, to pick up the new default.
+- Goggles distinguish the two shortfalls: a battery that will not wind because the surplus is
+  *borrowed* now says so, instead of blaming a network that a Stressometer says has plenty spare.
+
 ## 0.1.0
 
 First release.

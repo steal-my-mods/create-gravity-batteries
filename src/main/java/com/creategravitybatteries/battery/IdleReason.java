@@ -24,7 +24,15 @@ public enum IdleReason {
 	/** Nothing is turning the shaft, so there is no surplus to draw on. */
 	NOT_TURNING,
 	/** The network is turning but has less capacity spare than winding would cost. */
-	NO_SURPLUS;
+	NO_SURPLUS,
+	/**
+	 * The network is turning, and there would be spare capacity — but it is being supplied by
+	 * something spending a store of its own, so winding on it would be the network paying itself at a
+	 * round-trip loss. Reported separately from {@link #NO_SURPLUS} because the two look identical on
+	 * a Stressometer: a player staring at a network with plenty spare needs to be told the surplus is
+	 * borrowed rather than absent.
+	 */
+	NETWORK_ON_STORED_POWER;
 
 	public static IdleReason byOrdinal(int ordinal) {
 		IdleReason[] values = values();

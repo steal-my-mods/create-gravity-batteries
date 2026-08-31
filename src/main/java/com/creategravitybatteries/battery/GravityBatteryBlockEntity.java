@@ -4,6 +4,7 @@ import java.util.List;
 
 import com.creategravitybatteries.GBConfig;
 import com.creategravitybatteries.GBLang;
+import com.creategravitybatteries.registry.GBTags;
 import com.simibubi.create.content.contraptions.AssemblyException;
 import com.simibubi.create.content.contraptions.Contraption;
 import com.simibubi.create.content.contraptions.ContraptionCollider;
@@ -291,10 +292,16 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 	}
 
 	/**
-	 * Winding up costs what letting down pays, divided by the round-trip efficiency. Charging the loss
-	 * to this side rather than to the descent is what makes a self-charging loop impossible: a
-	 * discharging battery supplies strictly less than a charging battery of the same weight wants, so
-	 * two of them on one shaft can never close the circuit however they are geared.
+	 * Winding up costs what letting down pays, divided by the round-trip efficiency — which is
+	 * <b>1.0 by default</b>, so out of the box a battery gives back exactly what it took in.
+	 *
+	 * <p>That used to be 0.75, and the loss was described here as what made a self-charging loop
+	 * impossible. It was never quite true: a discharging battery cannot fund an equal or heavier one,
+	 * but a <em>lighter</em> one costs less than a heavier one supplies and was funded anyway —
+	 * measured, a six block weight filled two three block ones. {@link #storedCapacityOnNetwork()} is
+	 * what refuses that now, and it refuses it at any efficiency, which is what freed this number to be
+	 * a balance dial rather than a safety rail. Keeping the loss on the winding side still matters for
+	 * packs that set it below 1.0: it means a lower setting can only ever cost, never pay.
 	 *
 	 * <p>One method, read by both the network and {@link #decideMode()} through
 	 * {@link #getChargeDraw()}. Written twice they can disagree, and a battery that decided on one
@@ -352,6 +359,44 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 	/** Stress this battery would draw if it started winding at the shaft's current speed. */
 	public float getChargeDraw() {
 		return chargeImpactPerRpm() * Math.abs(getTheoreticalSpeed());
+	}
+
+	/**
+	 * Capacity on this network that is being paid for out of somebody's store rather than generated.
+	 *
+	 * <p>Winding up on this is the bug that {@code aBatteryWillNotWindUpOnBorrowedCapacity} locks, and
+	 * <b>this method is the only thing that refuses it</b> now that {@code roundTripEfficiency} defaults
+	 * to 1.0. Even when it did not, the loss only ever refused an <em>equal or heavier</em> battery,
+	 * which is what {@code twoBatteriesOnOneShaftCannotChargeEachOther} asserts; a lighter one costs
+	 * less than a heavier one supplies and was funded anyway. Measured at the old 0.75 default: a six
+	 * block weight filled two three block ones, then drained itself into a bare shaft. Not perpetual
+	 * motion, and still wrong — a store's charge is the player's to spend, and nothing should move it
+	 * without being asked.
+	 *
+	 * <p>Classified by {@link GBTags#KINETIC_ENERGY_STORAGE} rather than by {@code instanceof}, so a
+	 * foreign block goes down exactly the same line as one of this mod's own — which is what makes
+	 * {@code aBatteryWillNotWindUpOnBorrowedCapacity} cover an addon that does not exist yet, since
+	 * this battery is in the tag itself. The other half of that guarantee is the other mod declaring
+	 * itself, which is why {@code theBatteryDeclaresItselfAsKineticStorage} exists: without the tag
+	 * file this silently reverts to the old behaviour, and nothing else would notice.
+	 *
+	 * <p>Cheap enough per tick: {@code sources} holds only the network's actual generators, not its
+	 * members, so this is a handful of entries rather than the hundreds of shafts and cogs a network
+	 * can carry. Removed entries are skipped because Create only prunes them on its next capacity
+	 * recalculation, and a stale one here would be capacity subtracted twice.
+	 */
+	public float storedCapacityOnNetwork() {
+		if (!hasNetwork())
+			return 0;
+		KineticNetwork network = getOrCreateNetwork();
+		float stored = 0;
+		for (KineticBlockEntity source : network.sources.keySet()) {
+			if (source == this || source.isRemoved())
+				continue;
+			if (source.getBlockState().is(GBTags.KINETIC_ENERGY_STORAGE))
+				stored += network.getActualCapacityOf(source);
+		}
+		return stored;
 	}
 
 	/**
@@ -549,12 +594,24 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 		if (!canAscend())
 			return idle(IdleReason.FULLY_CHARGED);
 
+		// Capacity that only exists because something else is spending a store is not a surplus worth
+		// winding on -- see storedCapacityOnNetwork(). Subtracted from the charge test *only*: a
+		// discharging store really is holding the network up, so a battery deciding whether to let its
+		// own weight down must go on counting it. Take it out of the `headroom < 0` test above as well
+		// and a network comfortably covered by one battery reads as a deficit to the next one along,
+		// and every battery on it dumps at once.
+		float generatedHeadroom = headroom - storedCapacityOnNetwork();
+
 		float draw = getChargeDraw();
-		if (draw > 0 && headroom >= draw + GBConfig.chargeMarginStress()) {
+		float wanted = draw + GBConfig.chargeMarginStress();
+		if (draw > 0 && generatedHeadroom >= wanted) {
 			idleReason = IdleReason.NONE;
 			return BatteryMode.CHARGING;
 		}
-		return idle(IdleReason.NO_SURPLUS);
+		// Which of the two shortfalls this is. A network whose surplus is borrowed looks identical to
+		// one with plenty on a Stressometer, so saying "no surplus" there sends a player looking for a
+		// generator they already have.
+		return idle(headroom >= wanted ? IdleReason.NETWORK_ON_STORED_POWER : IdleReason.NO_SURPLUS);
 	}
 
 	/**

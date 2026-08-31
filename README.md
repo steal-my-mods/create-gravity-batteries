@@ -120,13 +120,21 @@ the battery's own ceiling and changing every belt speed in the base at once.
 
 ## Why two of them are not a perpetual motion machine
 
-The round-trip loss is charged entirely on the way *up*: winding costs
-`weight ÷ roundTripEfficiency`, letting down pays `weight`. So a battery that is letting down
-supplies strictly less than a battery of the same weight needs to wind, and the loop never closes —
-whatever they are geared through, and however many you chain. `twoBatteriesOnOneShaftCannotChargeEachOther`
-is the regression lock, and it asserts the right thing: not that the pair loses height, but that one
-never winds up on the other's output. The weaker version of that test passes a build where charging
-is deliberately made cheap, because two equal weights swapping height leave the total unchanged.
+A battery will not wind up on capacity that another *store* is supplying — any block in the
+`c:kinetic_energy_storage` tag, whether it is another Gravity Battery or another mod's. Capacity from
+a store is subtracted from what the charge test may spend, so the loop never closes however many you
+chain, and a battery's charge only ever moves when a player or a real generator puts it there.
+
+That is a flat refusal rather than an economic one, which is why `roundTripEfficiency` can be **1.0**
+by default: a battery gives back exactly what it took in. Create charges nothing for a water wheel, a
+belt or a gearbox, and buffering peaks instead of overbuilding generation is the reason to install a
+battery in the first place. Lower the setting if your pack wants storage to cost something; the
+refusal above does not depend on it.
+
+`twoBatteriesOnOneShaftCannotChargeEachOther` and `aBatteryWillNotWindUpOnBorrowedCapacity` are the
+regression locks — equal weights and unequal ones, because an earlier version of this mod relied on a
+round-trip loss and that only ever refused the equal case. A six block weight quietly filled two three
+block ones.
 
 ## Configuration
 
@@ -136,7 +144,7 @@ is deliberately made cheap, because two equal weights swapping height leave the 
 |---|---|---|
 | `stressPerBlock` | 4.0 | su/RPM per block of weight — the power dial |
 | `gearReduction` | 8 | how much slower the drum turns than the shaft — the duration dial |
-| `roundTripEfficiency` | 0.75 | fraction of the winding work you get back |
+| `roundTripEfficiency` | 1.0 | fraction of the winding work you get back — lossless by default |
 | `chargeMarginStress` | 64.0 | spare capacity required before winding starts |
 | `maxRpm` | 64 | speed a battery drives a network that has none of its own |
 | `maxWeightBlocks` | 512 | ceiling on the weight counted towards the rating |

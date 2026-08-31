@@ -23,9 +23,12 @@ import org.apache.commons.lang3.tuple.Pair;
  * turning. That is not a coincidence to be preserved by hand — it is what mechanical work is, and it
  * holds because the descent rate and the stress rating are both linear in RPM.
  *
- * <p>{@link #roundTripEfficiency} is the only loss, and it applies on the way up: charging costs
- * {@code stressPerBlock ÷ roundTripEfficiency} per block per RPM. Keeping the loss on one side means
- * a battery can never pay for its own charging, whatever it is wired to.
+ * <p>{@link #roundTripEfficiency} is <b>1.0 by default — a battery gives back exactly what it took
+ * in</b>. It is a dial for packs that want storage to cost something, not a safety rail: what refuses
+ * a battery funding another store is the {@code c:kinetic_energy_storage} tag, and it does that at any
+ * efficiency. Below 1.0 the loss lands entirely on the way up, so charging costs
+ * {@code stressPerBlock ÷ roundTripEfficiency} per block per RPM and letting down pays the flat
+ * rating. Keeping it one-sided is what stops a *lower* setting turning into a gain somewhere.
  */
 public class GBConfig {
 
@@ -63,10 +66,14 @@ public class GBConfig {
 			.defineInRange("gearReduction", 8, 1, 256);
 		roundTripEfficiency = builder
 			.comment("Fraction of the work put into winding a weight up that comes back out again.",
-				"The loss is charged entirely on the way up, which is what makes it impossible for",
-				"one battery to charge another -- a discharging battery cannot cover a charging one",
-				"of the same weight, whatever they are geared through.")
-			.defineInRange("roundTripEfficiency", 0.75, 0.01, 1.0);
+				"1.0 by default: a battery is a buffer, and smoothing peaks instead of overbuilding",
+				"generation is the reason to install one. Create charges nothing for a water wheel,",
+				"a belt or a gearbox, so a storage tax would be the only loss in the whole mod.",
+				"Lower it if you want storage to cost something -- the loss is charged entirely on",
+				"the way up, so winding costs weight/efficiency and letting down pays weight.",
+				"This is NOT what stops one battery charging another: the c:kinetic_energy_storage",
+				"tag does that, at any setting including 1.0.")
+			.defineInRange("roundTripEfficiency", 1.0, 0.01, 1.0);
 		chargeMarginStress = builder
 			.comment("Stress capacity a network must have spare, on top of the battery's own draw,",
 				"before it starts winding. This is the deadband that stops a battery flapping",

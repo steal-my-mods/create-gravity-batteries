@@ -65,6 +65,7 @@ mappings, so the output uses the same names the code here compiles against.
 | `tools/generate_logo.py` | The Create-family badge: the blueprint disc and the subject on it |
 | `tools/generate_structures.py` | The Ponder structure, the GameTest template, and the scene's lang keys |
 | `tools/check_lang.py` | Resolves every key the code asks for and fails if it is missing |
+| `registry/GBTags` | The `c:kinetic_energy_storage` convention, and the reasoning for it being a tag |
 | `battery/CableGeometry` | Where the cable's pieces go. Out of the client package so a GameTest can reach it |
 | `battery/display/*DisplaySource` | What a Display Board shows: the mode on one, the charge on the other |
 | `registry/GBDisplaySources` | Registers those, and — separately — tells a Display Link the block offers them |
@@ -167,9 +168,25 @@ mappings, so the output uses the same names the code here compiles against.
   disagree, and a mutation test proved it: making charging cheap in `calculateStressApplied` alone left
   `twoBatteriesOnOneShaftCannotChargeEachOther` passing, because the *decision* was still using the
   honest number.
-- **The round-trip loss goes on the way up, and that is what refuses perpetual motion.** Winding costs
-  `weight ÷ roundTripEfficiency`; letting down pays `weight`. A discharging battery therefore supplies
-  strictly less than a charging battery of the same weight wants, whatever they are geared through.
+- **The round-trip loss is not what refuses perpetual motion, and believing it was cost this mod a
+  bug.** It reads like it should: winding costs `weight / roundTripEfficiency` and letting down pays
+  `weight`, so a battery can never fund an equal or heavier one — which is exactly what
+  `twoBatteriesOnOneShaftCannotChargeEachOther` asserts with two equal weights, and that test passing
+  was mistaken for the whole guarantee. A *lighter* battery costs less than a heavier one supplies, and
+  was funded. Measured at the old 0.75 default: a six block weight filled two three block ones, then
+  spent its remaining five blocks into a bare shaft. The threshold was
+  `weightB <= roundTripEfficiency * weightA`. The tag does the refusing now, at any efficiency — see
+  *The kinetic storage convention* — and `aBatteryWillNotWindUpOnBorrowedCapacity` is the lock that
+  covers the unequal case the old reasoning missed.
+- **`roundTripEfficiency` defaults to 1.0, and that is a considered default rather than a missing
+  loss.** A battery is a buffer; sizing generation to average load and absorbing the peaks is the
+  reason to install one, so taxing it charges the player for the feature. Create itself models no
+  losses anywhere — water wheels, belts and gearboxes are all free, and the Steam Engine's only
+  "efficiency" is a boiler *allocation* ratio, not waste — so a storage tax would have been the single
+  lossy conversion in the whole ecosystem. FE mods reach the same answer: Thermal, Mekanism, AE2,
+  Ender IO and Immersive Engineering all store losslessly and put their losses in transmission, where
+  the player is making a decision. The knob stays for packs that want a cost, and the loss still lands
+  entirely on the winding side so that a lower setting can only cost, never pay.
 - **`twoBatteriesOnOneShaftCannotChargeEachOther` asserts the mode *pair*, not the total height.** The
   weaker version — "the sum of the two offsets never falls" — passes a build where charging is
   deliberately made cheap, because two equal weights swapping height leave the sum flat. What the cheap
@@ -650,6 +667,50 @@ toggles its weight, which works and is arguably useful. The recipe's `c:plates/i
 Create's Ponder index is what makes them findable, and nothing complains if you are not. `registerTags`
 joins four of Create's own pages — kinetic sources, movement anchor, threshold switch targets, display
 sources — each of which is a claim the block actually makes.
+
+## The kinetic storage convention
+
+`c:kinetic_energy_storage` is a cross-mod block tag meaning **the capacity this block supplies to a
+kinetic network is drawn from a store it filled earlier, not generated.** A battery refuses to wind up
+on capacity supplied by anything in it. Create: CAES honours the same tag from its 0.1.3.
+
+- **It is a tag because only one bit has to cross the mod boundary.** Create already exposes
+  `KineticNetwork.sources` and `getActualCapacityOf`, so any mod can enumerate a network's generators
+  and read each one's exact contribution with no cooperation from the mod that owns it — and
+  `getActualCapacityOf` multiplies by `getGeneratedSpeed()`, which is zero for a store that is not
+  currently spending, so the *runtime* half is answered too. All that is missing is the
+  classification. A shared API artifact or a NeoForge capability would both need a common class on the
+  classpath and would only re-report a number Create already gives you.
+- **The `c` namespace is the point, not a detail.** Nobody owns it, so a second addon adds its block
+  without depending on this one, and **a pack author can add a third mod's block with a datapack** and
+  fix an interaction neither author has heard of. That last property is the one the alternatives
+  cannot match, and it is the reason to prefer the tag even though it is the least expressive option.
+- **Subtract it from the charge test only.** `storedCapacityOnNetwork()` comes out of the charging
+  branch of `decideMode` and nowhere else. A discharging store genuinely *is* holding the network up,
+  so the `headroom < 0` test must go on counting it — take it out there too and a network one battery
+  is comfortably covering reads as a deficit to the next battery along, and every battery on it dumps
+  at once.
+- **Tag the block that is the kinetic source**, which for a multiblock is not the one a player thinks
+  of as the storage. CAES tags the Air Engine and not the Pressure Vessel for exactly this reason.
+- **The scan walks `sources`, not `members`.** Sources is the network's generators — a handful —
+  where members is every shaft and cog in the factory. That is what makes it affordable every tick
+  with none of the caching CAES's engine coalition needs. Removed entries are skipped by hand because
+  Create only prunes them on its next capacity recalculation, and a stale one would be capacity
+  subtracted twice.
+- **Both halves are tested, and they are different tests.**
+  `aBatteryWillNotWindUpOnBorrowedCapacity` covers the behaviour, and it covers it *for foreign
+  blocks* even though it uses a battery as the tagged source, because the check is the tag and not an
+  `instanceof` — a foreign block goes down the identical line.
+  `theBatteryDeclaresItselfAsKineticStorage` covers the half the behaviour test cannot see: the tag
+  being renamed consistently across `GBTags` and the json still passes every behaviour test and
+  silently stops the mod composing with every other addon. It spells the name out as a literal for
+  that reason.
+- **There is no cross-mod GameTest, and that was a deliberate choice rather than an oversight.**
+  Standing a battery and an Air Engine on one shaft needs both mods in one dev runtime, which means a
+  cross-repo build dependency and a CI job that cannot run until the sibling has published. The split
+  above gets the same guarantee out of two single-mod suites: each mod proves it declares itself, and
+  each proves it refuses tagged capacity. Two mods passing both compose — and that scales to mods that
+  do not exist yet, which an integration test against one named sibling does not.
 
 ## Testing the client
 

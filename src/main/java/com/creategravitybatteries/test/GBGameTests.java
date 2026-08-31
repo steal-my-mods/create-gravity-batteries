@@ -15,6 +15,7 @@ import com.creategravitybatteries.battery.GravityBatteryBlockEntity;
 import com.creategravitybatteries.battery.IdleReason;
 import com.creategravitybatteries.registry.GBBlocks;
 import com.creategravitybatteries.registry.GBDisplaySources;
+import com.creategravitybatteries.registry.GBTags;
 import com.simibubi.create.AllBlocks;
 import com.simibubi.create.api.behaviour.display.DisplaySource;
 import com.simibubi.create.api.contraption.BlockMovementChecks;
@@ -30,6 +31,7 @@ import com.simibubi.create.content.redstone.thresholdSwitch.ThresholdSwitchObser
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.contents.TranslatableContents;
@@ -42,6 +44,7 @@ import net.minecraft.nbt.NbtAccounter;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.tags.TagKey;
 import net.minecraft.util.Mth;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.LightLayer;
@@ -425,6 +428,106 @@ public class GBGameTests {
 	private static boolean opposed(BatteryMode one, BatteryMode other) {
 		return (one == BatteryMode.CHARGING && other == BatteryMode.DISCHARGING)
 			|| (one == BatteryMode.DISCHARGING && other == BatteryMode.CHARGING);
+	}
+
+	/**
+	 * A battery does not wind up on capacity another store is supplying, however light it is.
+	 *
+	 * <p>{@link #twoBatteriesOnOneShaftCannotChargeEachOther} uses two equal weights, which was the one
+	 * case the old 0.75 round-trip loss refused on its own: winding cost {@code weight / efficiency} and
+	 * letting down paid {@code weight}, so an equal or heavier battery could never be funded. A
+	 * <em>lighter</em> one could. Measured at that default: a six block weight funded two three block
+	 * ones and then spent the rest of itself into a bare shaft. The pair here — six against two — was
+	 * comfortably inside the old {@code weightB <= efficiency * weightA} threshold rather than balanced
+	 * on its edge, and with the efficiency now 1.0 there is no threshold left: the tag is the only thing
+	 * standing between these two batteries, in this test and in the equal-weight one.
+	 *
+	 * <p>Not perpetual motion: the transfer loses on the way up like any other winding, so the total
+	 * never rises. It is wrong for a different reason. A store's charge is the player's to spend, and a
+	 * battery that quietly moves it into a neighbour has made a decision that was not its to make.
+	 *
+	 * <p>This is also the cross-mod test, because the check is
+	 * {@link com.creategravitybatteries.registry.GBTags#KINETIC_ENERGY_STORAGE} rather than an
+	 * {@code instanceof}: battery A goes down the same line a foreign block would, so what passes here
+	 * passes for an addon nobody has written yet. The half this cannot see is the other mod declaring
+	 * itself, which is {@link #theBatteryDeclaresItselfAsKineticStorage}'s job.
+	 */
+	@GameTest(template = "test_rig", timeoutTicks = 300)
+	public static void aBatteryWillNotWindUpOnBorrowedCapacity(GameTestHelper helper) {
+		rig(helper);
+		placeBattery(helper, BATTERY_B);
+
+		// Six blocks, flush under battery A, over a clear shaft: a full store and the network's only
+		// possible source. Two blocks under battery B, hanging clear so it has room to wind either way.
+		for (int dz = 0; dz <= 1; dz++)
+			for (int dy = 0; dy <= 2; dy++)
+				helper.setBlock(new BlockPos(3, HIGH_TOP + 2 - dy, 5 + dz), Blocks.SLIME_BLOCK);
+		for (int dy = 0; dy <= 1; dy++)
+			helper.setBlock(new BlockPos(5, HIGH_TOP - dy, 5), Blocks.SLIME_BLOCK);
+
+		activate(helper, BATTERY_A);
+		activate(helper, BATTERY_B);
+
+		List<String> wound = new ArrayList<>();
+		boolean[] everDischarged = new boolean[1];
+		// Offset is measured downward, so winding up is the offset falling. Captured after the rig has
+		// settled rather than assumed, because where the weight was picked up is the rig's business.
+		float[] startOffset = new float[] {Float.NaN};
+		float[] lowest = new float[] {Float.MAX_VALUE};
+		for (int tick = SETTLE_TICKS; tick < 260; tick += 4) {
+			int at = tick;
+			helper.runAfterDelay(at, () -> {
+				GravityBatteryBlockEntity a = battery(helper, BATTERY_A);
+				GravityBatteryBlockEntity b = battery(helper, BATTERY_B);
+				if (a.getMode() == BatteryMode.DISCHARGING)
+					everDischarged[0] = true;
+				if (b.getMode() == BatteryMode.CHARGING)
+					wound.add("t=" + at + " reason=" + b.getIdleReason());
+				if (Float.isNaN(startOffset[0]))
+					startOffset[0] = b.offset;
+				lowest[0] = Math.min(lowest[0], b.offset);
+			});
+		}
+
+		helper.runAfterDelay(270, () -> {
+			GravityBatteryBlockEntity b = battery(helper, BATTERY_B);
+			// Without this the test could pass on a rig where A never spun up at all.
+			helper.assertTrue(everDischarged[0], "battery A never let its weight down, so nothing was "
+				+ "ever offering the borrowed capacity this test is about");
+			helper.assertTrue(wound.isEmpty(),
+				"a two block weight wound up on a six block weight's output: " + wound);
+			helper.assertTrue(lowest[0] >= startOffset[0] - 0.001F,
+				"battery B gained height it did not pay for: offset " + startOffset[0] + " -> "
+					+ lowest[0]);
+			helper.assertTrue(b.getIdleReason() == IdleReason.NETWORK_ON_STORED_POWER,
+				"a battery refusing a borrowed surplus should say so rather than blame the network for "
+					+ "a shortfall it does not have, reported " + b.getIdleReason());
+			helper.succeed();
+		});
+	}
+
+	/**
+	 * The battery is in {@code c:kinetic_energy_storage}, under that exact name.
+	 *
+	 * <p>Two things this catches that nothing else can. The tag file going missing turns
+	 * {@link #storedCapacityOnNetwork} into a constant zero and silently restores the old behaviour —
+	 * though {@link #aBatteryWillNotWindUpOnBorrowedCapacity} would also fail on that, since this block
+	 * is the tagged source in its own test. The one only this catches is the tag being <em>renamed</em>
+	 * consistently across {@code GBTags} and the json: everything here still passes, and the mod has
+	 * quietly stopped composing with every other addon that honours the convention. So the name is
+	 * spelled out here rather than read from the constant, which is the point of the test.
+	 */
+	@GameTest(template = "test_rig", timeoutTicks = 40)
+	public static void theBatteryDeclaresItselfAsKineticStorage(GameTestHelper helper) {
+		TagKey<Block> convention = TagKey.create(Registries.BLOCK,
+			ResourceLocation.fromNamespaceAndPath("c", "kinetic_energy_storage"));
+		helper.assertTrue(GBBlocks.GRAVITY_BATTERY.get().defaultBlockState().is(convention),
+			"the Gravity Battery must be in c:kinetic_energy_storage, or every other addon honouring "
+				+ "the convention will go on winding up on its charge");
+		helper.assertTrue(convention.location().equals(GBTags.KINETIC_ENERGY_STORAGE.location()),
+			"GBTags.KINETIC_ENERGY_STORAGE has drifted from the shared name: "
+				+ GBTags.KINETIC_ENERGY_STORAGE.location());
+		helper.succeed();
 	}
 
 	// --- letting go -------------------------------------------------------------------------------
