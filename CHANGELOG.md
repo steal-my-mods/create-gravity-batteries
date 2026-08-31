@@ -28,6 +28,14 @@ a lone battery on a network behaves exactly as it did.
   the feature. The knob is still there for packs that want storage to cost something. **Existing worlds
   keep 0.75**, because the value is already written to their server config — delete the line, or set it
   to 1.0, to pick up the new default.
+- **A battery no longer spends its charge into a network where nothing is drawing.** Reported from
+  play: attaching a bare shaft to a charged battery span it up and it lowered its weight to the floor
+  driving nothing. A cogwheel did it too, and so did a *disengaged* clutch. The guard that was supposed
+  to prevent this asked whether a shaft was attached, which is a much weaker question than whether
+  anything wants power; it now measures the stress the network would actually draw. A battery holding
+  for this reason says "Nothing needs power" rather than reporting the shaft as unpowered. This is not
+  a change to how a battery behaves under *partial* load — it still supplies its full rating, and
+  sizing the weight to the shortfall is still the player's job.
 - Goggles distinguish the two shortfalls: a battery that will not wind because the surplus is
   *borrowed* now says so, instead of blaming a network that a Stressometer says has plenty spare.
 

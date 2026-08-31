@@ -1,6 +1,12 @@
 package com.creategravitybatteries.battery;
 
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import com.creategravitybatteries.GBConfig;
 import com.creategravitybatteries.GBLang;
@@ -11,6 +17,7 @@ import com.simibubi.create.content.contraptions.ContraptionCollider;
 import com.simibubi.create.content.contraptions.ControlledContraptionEntity;
 import com.simibubi.create.content.contraptions.piston.LinearActuatorBlockEntity;
 import com.simibubi.create.content.kinetics.KineticNetwork;
+import com.simibubi.create.content.kinetics.RotationPropagator;
 import com.simibubi.create.content.kinetics.base.IRotate;
 import com.simibubi.create.content.kinetics.base.KineticBlockEntity;
 import com.simibubi.create.content.redstone.displayLink.DisplayLinkBlock;
@@ -88,6 +95,12 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 	 * placed next to a running motor spends its first tick discharging.
 	 */
 	private static final int WARMUP_TICKS = 5;
+
+	/**
+	 * Blocks the demand walk will visit before giving up and assuming there is a load. See
+	 * {@link #walkForSomethingThatWantsPower()} for why the cap fails in that direction.
+	 */
+	private static final int DEMAND_WALK_LIMIT = 256;
 
 	private BatteryMode mode = BatteryMode.IDLE;
 	private IdleReason idleReason = IdleReason.NO_WEIGHT;
@@ -580,7 +593,8 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 		// Nothing else on this network can turn it, and there is something attached worth turning. The
 		// second half matters: without it a charged battery in an empty room would spin against
 		// nothing and quietly lower its own weight to the floor.
-		boolean soleSource = !hasSource() && networkCapacityWithoutSelf() <= 0 && hasSomethingToDrive();
+		boolean couldTakeOver = !hasSource() && networkCapacityWithoutSelf() <= 0;
+		boolean soleSource = couldTakeOver && hasSomethingToDrive();
 
 		if (headroom < 0 || soleSource) {
 			if (!canDescend())
@@ -588,6 +602,14 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 			idleReason = IdleReason.NONE;
 			return BatteryMode.DISCHARGING;
 		}
+
+		// Nothing else can turn this network and nothing on it wants turning. Reported ahead of
+		// NOT_TURNING, which is true here but says the opposite of what a player needs to hear: the
+		// shaft is not turning because this battery is deliberately holding, not because it is waiting
+		// for power. Only when there is charge to spend, since an empty battery on a dark network is
+		// better described by the test below.
+		if (couldTakeOver && canDescend())
+			return idle(IdleReason.NOTHING_TO_DRIVE);
 
 		if (Math.abs(getTheoreticalSpeed()) == 0)
 			return idle(IdleReason.NOT_TURNING);
@@ -677,25 +699,154 @@ public class GravityBatteryBlockEntity extends LinearActuatorBlockEntity
 		return offset > 1.0E-3F;
 	}
 
-	/** Whether either shaft face has a kinetic block on it that would take the rotation. */
+	/**
+	 * Whether anything on this network actually wants power.
+	 *
+	 * <p>This used to ask whether either shaft face held a kinetic block, which is a different
+	 * question and a much weaker one. Reported from play: attaching a bare shaft to a charged battery
+	 * spun it up and it lowered its weight to the floor driving nothing. A cogwheel did it too, and so
+	 * did a <em>disengaged</em> clutch — which is the clearest case, because a disengaged clutch splits
+	 * the network, so the battery's whole world was itself and a clutch that was passing nothing
+	 * through. The guard's own comment always said it existed so that "a charged battery in an empty
+	 * room would not spin against nothing"; an empty room had simply been implemented as *no kinetic
+	 * neighbour* rather than *no demand*.
+	 *
+	 * <p><b>Not the same question as throttling the descent to the load</b>, which is considered and
+	 * rejected in CLAUDE.md and stays rejected. That is about modulating the rate to match a partial
+	 * load, and it is refused because the speed a generator declares <em>is</em> the network's speed,
+	 * so regulating would slow every belt in the base. None of that applies at zero load: there is no
+	 * rate to modulate, the battery simply does not start.
+	 *
+	 * <p>Latent demand, not {@link #networkStressWithoutSelf()}, and that distinction is the whole
+	 * difficulty. Create scales stress by speed — {@code getActualStressOf} multiplies the recorded
+	 * impact by {@code |getTheoreticalSpeed()|} — so on a network nothing is turning, every member
+	 * reports zero stress however much machinery is bolted to it. Testing the stress total would have
+	 * read "no load" at exactly the moment a battery is deciding whether to take over, and failover
+	 * would never have happened again. Impact does not depend on speed, which is why the answer comes
+	 * from {@code calculateStressApplied} on each block instead.
+	 *
+	 * <p>Stores are skipped for the same reason their capacity is — see
+	 * {@link #storedCapacityOnNetwork()}. A battery must not spend its charge to fund another store's
+	 * charging, so demand from anything in {@link GBTags#KINETIC_ENERGY_STORAGE} is not demand worth
+	 * descending for. Without it a source dying while a neighbouring store was charging would have this
+	 * battery take over to feed it, for the tick or two it takes the tag to refuse from the other side.
+	 *
+	 * <p><b>Measured every tick, and a cache was tried and taken out.</b> This is gated by the
+	 * {@code &&} chain in {@code decideMode} — it only runs when nothing else on the network is a source
+	 * and nothing else is supplying capacity — and it stops at the first block that draws anything. A
+	 * 20-tick cache looked like an obvious win and was actively wrong: the first call lands the tick
+	 * after the warm-up, before the rotation propagator has finished, so it cached "nothing to drive"
+	 * from an incomplete picture and held it for a second. A reading this cheap is not worth a
+	 * staleness window over the one moment the answer is guaranteed to be wrong.
+	 *
+	 * <p>No {@code isLoaded} guard is needed any more, and the hazard it protected against is gone
+	 * rather than merely handled: this reads {@code getBlockState()} off block entities already in the
+	 * network's member map, which is a cached field on a loaded block entity, instead of asking a
+	 * {@code ServerLevel} for arbitrary neighbour positions and force-loading a chunk per tick at the
+	 * edge of the loaded area.
+	 */
 	private boolean hasSomethingToDrive() {
-		Direction.Axis axis = getRotationAxisOfThis();
-		for (Direction.AxisDirection sign : Direction.AxisDirection.values()) {
-			Direction side = Direction.get(sign, axis);
-			BlockPos neighbour = worldPosition.relative(side);
-			// Asking a ServerLevel for a block state force-loads its chunk, and this runs every tick
-			// on a network with no source -- so a battery at the edge of the loaded area would try to
-			// load a chunk per tick. Create's own propagator declines to work on unloaded positions
-			// for the same reason, and declining is the conservative direction here: an unloaded
-			// neighbour is not a shaft worth spending charge into.
-			if (!level.isLoaded(neighbour))
-				continue;
-			BlockState state = level.getBlockState(neighbour);
-			if (state.getBlock() instanceof IRotate rotate
-				&& rotate.hasShaftTowards(level, neighbour, state, side.getOpposite()))
+		if (level == null)
+			return false;
+		// A network exists exactly when something is turning, so this is the branch taken while the
+		// battery is already carrying the base. The member map is authoritative and needs no walking.
+		if (hasNetwork()) {
+			for (Map.Entry<KineticBlockEntity, Float> entry : getOrCreateNetwork().members.entrySet())
+				if (wantsPower(entry.getKey(), entry.getValue()))
+					return true;
+			return false;
+		}
+		return walkForSomethingThatWantsPower();
+	}
+
+	/**
+	 * Whether one member is a load worth descending for.
+	 *
+	 * <p>The impact test comes before the tag lookup because a shaft, a cogwheel, a gearbox and a
+	 * clutch all sit at zero, and on any real network they are most of the blocks.
+	 *
+	 * <p>Stores are skipped for the same reason their capacity is — see
+	 * {@link #storedCapacityOnNetwork()}. A battery must not spend its charge funding another store's
+	 * charging, so demand from anything in {@link GBTags#KINETIC_ENERGY_STORAGE} is not demand worth
+	 * descending for.
+	 */
+	private boolean wantsPower(KineticBlockEntity member, float impact) {
+		return member != this && !member.isRemoved() && impact > 0
+			&& !member.getBlockState().is(GBTags.KINETIC_ENERGY_STORAGE);
+	}
+
+	/**
+	 * Walks the kinetic topology looking for one block that would draw stress.
+	 *
+	 * <p>Needed because <b>a stopped Create network does not exist.</b> {@code KineticBlockEntity.network}
+	 * is only ever set from {@code setSource}, which copies it off a block that already has one, or by a
+	 * generator asserting itself — and {@code clearKineticInformation} nulls it. So every block on a
+	 * shaft run with nothing driving it has {@code network == null} and there is no member map to
+	 * consult. Confirmed by probe: an idle battery with a shaft and an Encased Fan bolted to it reported
+	 * {@code hasNetwork=false}. Reading the network was the first attempt at this fix and it could never
+	 * have worked.
+	 *
+	 * <p>Faithful rather than approximate, because guessing at Create's connection rules would mean
+	 * missing cogwheel meshing, large-to-small gearing and every custom connection an addon adds.
+	 * {@code RotationPropagator.getConnectedNeighbours} is private, but the two pieces it is built from
+	 * are public — {@code addPropagationLocations} for the candidate positions, which is what carries a
+	 * block's own idea of what it reaches, and {@code isConnected} for the edge test. This is those two
+	 * composed the same way, so it agrees with the propagator by construction.
+	 *
+	 * <p>Capped, and the cap fails <em>towards the old behaviour</em>: a component larger than
+	 * {@link #DEMAND_WALK_LIMIT} blocks with no load found in it is treated as a load rather than
+	 * risking a battery that refuses to carry a large base. Reaching the cap needs a few hundred
+	 * kinetic blocks that all draw nothing, which is a shaft sculpture rather than a factory — anything
+	 * with a machine on it answers within a few nodes of that machine.
+	 */
+	private boolean walkForSomethingThatWantsPower() {
+		Set<BlockPos> seen = new HashSet<>();
+		Deque<KineticBlockEntity> queue = new ArrayDeque<>();
+		seen.add(worldPosition);
+		queue.add(this);
+		int visited = 0;
+		while (!queue.isEmpty()) {
+			if (++visited > DEMAND_WALK_LIMIT)
 				return true;
+			KineticBlockEntity current = queue.poll();
+			if (current != this && wantsPower(current, current.calculateStressApplied()))
+				return true;
+			for (KineticBlockEntity neighbour : connectedNeighboursOf(current))
+				if (seen.add(neighbour.getBlockPos()))
+					queue.add(neighbour);
 		}
 		return false;
+	}
+
+	/** {@code RotationPropagator.getConnectedNeighbours}, which is private, out of its public parts. */
+	private List<KineticBlockEntity> connectedNeighboursOf(KineticBlockEntity be) {
+		List<KineticBlockEntity> found = new ArrayList<>();
+		BlockPos pos = be.getBlockPos();
+		if (!level.isLoaded(pos))
+			return found;
+		List<BlockPos> candidates = new ArrayList<>();
+		for (Direction face : Direction.values()) {
+			BlockPos relative = pos.relative(face);
+			// Create's own propagator declines unloaded positions rather than force-loading a chunk,
+			// and declining is the conservative direction here too.
+			if (level.isLoaded(relative))
+				candidates.add(relative);
+		}
+		if (be.getBlockState().getBlock() instanceof IRotate rotate)
+			candidates = be.addPropagationLocations(rotate, be.getBlockState(), candidates);
+		for (BlockPos candidate : candidates) {
+			if (!level.isLoaded(candidate))
+				continue;
+			BlockState state = level.getBlockState(candidate);
+			if (!(state.getBlock() instanceof IRotate) || !state.hasBlockEntity())
+				continue;
+			if (!(level.getBlockEntity(candidate) instanceof KineticBlockEntity neighbour))
+				continue;
+			if (RotationPropagator.isConnected(be, neighbour)
+				|| RotationPropagator.isConnected(neighbour, be))
+				found.add(neighbour);
+		}
+		return found;
 	}
 
 	private Direction.Axis getRotationAxisOfThis() {

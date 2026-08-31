@@ -32,7 +32,15 @@ public enum IdleReason {
 	 * a Stressometer: a player staring at a network with plenty spare needs to be told the surplus is
 	 * borrowed rather than absent.
 	 */
-	NETWORK_ON_STORED_POWER;
+	NETWORK_ON_STORED_POWER,
+	/**
+	 * Nothing else on the network can turn it, and nothing on it wants turning — a bare shaft, a
+	 * cogwheel, a disengaged clutch. The battery is holding rather than spending its charge into
+	 * something that would do no work with it. Reported ahead of {@link #NOT_TURNING}, which is also
+	 * true in this state but tells a player the opposite of what is happening: the shaft is still
+	 * because the battery chose to hold, not because it is waiting for a generator.
+	 */
+	NOTHING_TO_DRIVE;
 
 	public static IdleReason byOrdinal(int ordinal) {
 		IdleReason[] values = values();

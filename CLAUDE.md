@@ -149,12 +149,52 @@ mappings, so the output uses the same names the code here compiles against.
   weight whose floor is dug out from under it has an unchanged offset, so a cache that outlived the
   tick would report it still resting for ever. `clearingTheFloorLetsTheWeightCarryOnDown` is what fails
   on that mutation — verified, not assumed.
-- **`hasSomethingToDrive()` will not force-load a chunk.** It reads both horizontal neighbours every
-  tick on a network with no source, and `Level#getBlockState` on a `ServerLevel` goes through
-  `getChunk(x, z)` with force-load *true* — so a battery at the edge of the loaded area would try to
-  load a chunk per tick. Guarded with `level.isLoaded(neighbour)`, which is what Create's own
-  propagator does, and which fails in the conservative direction: an unloaded neighbour is not a shaft
-  worth spending charge into.
+- **`hasSomethingToDrive()` asks whether anything wants power, and asking whether a shaft is *present*
+  was a bug reported from play.** Attaching a bare shaft to a charged battery span it up and it lowered
+  its weight to the floor driving nothing; a cogwheel did it too, and so did a *disengaged* clutch —
+  which is the clearest case, because a disengaged clutch splits the network, so the battery's whole
+  world was itself and a clutch passing nothing through. The guard's own comment always said it existed
+  so that "a charged battery in an empty room would not spin against nothing"; an empty room had simply
+  been implemented as *no kinetic neighbour* rather than *no demand*.
+  `aChargedBatteryOnABareShaftStaysPut` is the lock, and it is caught by three tests on the mutation.
+- **This is not the rejected "throttle the descent to the load", and that stays rejected.** See
+  *Balance*. Throttling is about modulating the *rate* to match a partial load, and it is refused
+  because the speed a generator declares *is* the network's speed, so regulating would slow every belt
+  in the base. None of that applies at zero load: there is no rate to modulate, the battery just does
+  not start. Do not collapse the two.
+- **A stopped Create network does not exist, and that is what makes the demand test hard.**
+  `KineticBlockEntity.network` is only ever assigned from `setSource` — which copies it off a block that
+  already has one — or by a generator asserting itself, and `clearKineticInformation` nulls it. So every
+  block on a shaft run with nothing driving it has `network == null` and there is **no member map to
+  walk**. Reading `KineticNetwork.members` was the first attempt at this fix and it could never have
+  worked; confirmed by probe, an idle battery with a shaft and an Encased Fan bolted to it reported
+  `hasNetwork=false`. `walkForSomethingThatWantsPower` walks the topology itself for that reason, and
+  only the branch taken while the battery is already carrying the base reads `members`.
+- **The topology walk is Create's own, reassembled from its public parts.**
+  `RotationPropagator.getConnectedNeighbours` is private, but the two things it is built from are not:
+  `KineticBlockEntity#addPropagationLocations` for the candidate positions — which is what carries a
+  block's own idea of what it reaches, including large-cog diagonals and any addon's custom
+  connections — and `RotationPropagator.isConnected` for the edge test. Composing those two gives a
+  walk that agrees with the propagator by construction. Do not hand-roll the connection rules instead;
+  cogwheel meshing and large-to-small gearing are not guessable.
+- **Latent impact, never `networkStressWithoutSelf()`.** Create scales stress by speed —
+  `getActualStressOf` multiplies the recorded impact by `|getTheoreticalSpeed()|` — so on a network
+  nothing is turning, every member reports zero stress however much machinery is bolted to it. Testing
+  the stress total would have read "no load" at exactly the moment a battery is deciding whether to
+  take over, and failover would never have happened again. `calculateStressApplied()` is a flat lookup
+  of the block's impact and does not depend on speed, which is why the walk asks each block that.
+- **The demand walk is measured every tick, and a cache was tried and taken out.** It is gated by the
+  `&&` chain in `decideMode` — it only runs when nothing else is a source and nothing else supplies
+  capacity — and it stops at the first block that draws anything. A 20-tick cache looked like an
+  obvious win and was actively wrong: the first call lands the tick after the warm-up, before the
+  rotation propagator has finished, so it cached "nothing to drive" from an incomplete picture and held
+  it for a second. Seven GameTests failed on it. `DEMAND_WALK_LIMIT` is the cost control instead, and
+  it fails *towards the old behaviour* — a component bigger than the cap with no load found in it is
+  treated as a load, rather than risking a battery that refuses to carry a large base.
+- **`load()` in the GameTests is not scaffolding, it is the other half of the guard.** Six tests need a
+  real consumer on the shaft before a battery will discharge at all, and the rig used to get its
+  discharges for free from a bare shaft. Every one of those six fails on a build with the guard removed,
+  which is why the Encased Fan (impact 2) is there rather than a longer shaft.
 - **`reprobeDrop` runs at the two moments the measurement is known to be stale, and never per tick.**
   The weight arriving at the top, where a charge reading is about to be quoted from a possibly ancient
   figure; and the cached drop claiming the weight is at the bottom while `canDescend()` says otherwise,

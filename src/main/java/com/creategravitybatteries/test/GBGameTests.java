@@ -210,6 +210,7 @@ public class GBGameTests {
 	@GameTest(template = "test_rig", timeoutTicks = 400)
 	public static void losingTheSourceLetsTheWeightDown(GameTestHelper helper) {
 		rig(helper);
+		load(helper);
 		hangWeight(helper, 3, HIGH_TOP);
 		activate(helper, BATTERY_A);
 		drive(helper);
@@ -241,6 +242,7 @@ public class GBGameTests {
 	@GameTest(template = "test_rig", timeoutTicks = 300)
 	public static void aRestingWeightSuppliesNothing(GameTestHelper helper) {
 		rig(helper);
+		load(helper);
 		hangWeight(helper, 3, RESTING_TOP);
 		activate(helper, BATTERY_A);
 
@@ -308,6 +310,7 @@ public class GBGameTests {
 	public static void clearingTheFloorLetsTheWeightCarryOnDown(GameTestHelper helper) {
 		// A shelf for the weight to land on partway down, with the real floor further below.
 		rig(helper);
+		load(helper);
 		for (int x = 2; x <= 4; x++)
 			for (int z = 4; z <= 6; z++)
 				helper.setBlock(new BlockPos(x, 4, z), Blocks.STONE);
@@ -456,6 +459,12 @@ public class GBGameTests {
 	public static void aBatteryWillNotWindUpOnBorrowedCapacity(GameTestHelper helper) {
 		rig(helper);
 		placeBattery(helper, BATTERY_B);
+		// Something for battery A to actually drive, east of battery B so neither weight column is in
+		// the way. Without it A holds station -- see aChargedBatteryOnABareShaftStaysPut.
+		helper.setBlock(new BlockPos(6, SHAFT_Y, 5), AllBlocks.SHAFT.getDefaultState()
+			.setValue(BlockStateProperties.AXIS, Direction.Axis.X));
+		helper.setBlock(new BlockPos(7, SHAFT_Y, 5), AllBlocks.ENCASED_FAN.getDefaultState()
+			.setValue(BlockStateProperties.FACING, Direction.EAST));
 
 		// Six blocks, flush under battery A, over a clear shaft: a full store and the network's only
 		// possible source. Two blocks under battery B, hanging clear so it has room to wind either way.
@@ -944,6 +953,72 @@ public class GBGameTests {
 		});
 	}
 
+	/**
+	 * A charged battery on a shaft with nothing drawing on it holds station.
+	 *
+	 * <p>Reported from play, for both this mod and Create: CAES: attaching a bare shaft to a charged
+	 * battery spun it up and it lowered its weight to the floor driving nothing. A cogwheel did it too,
+	 * and so did a <em>disengaged</em> clutch, which is the clearest case — a disengaged clutch splits
+	 * the network, so the battery's whole world was itself and a clutch passing nothing through.
+	 *
+	 * <p>The guard that was supposed to prevent this asked whether either shaft face held a kinetic
+	 * block, which is a much weaker question than whether anything wants power. Its own comment said it
+	 * existed so "a charged battery in an empty room would not spin against nothing"; an empty room had
+	 * been implemented as <em>no kinetic neighbour</em> rather than <em>no demand</em>.
+	 *
+	 * <p>Deliberately <b>not</b> a reversal of the rejected "throttle the descent to the load" idea in
+	 * CLAUDE.md, which stays rejected. That is about modulating the rate to match a partial load, and it
+	 * is refused because the speed a generator declares is the network's speed. At zero load there is no
+	 * rate to modulate; the battery simply does not start.
+	 *
+	 * <p>Three shapes on one network, because they reach the walk differently: the rig's plain shaft, a
+	 * cogwheel, and a clutch. The opposite direction is covered by the rest of the suite —
+	 * {@code load()} exists because six tests need a real consumer before a battery will discharge at
+	 * all, and every one of them fails on a build with this guard removed.
+	 */
+	@GameTest(template = "test_rig", timeoutTicks = 200)
+	public static void aChargedBatteryOnABareShaftStaysPut(GameTestHelper helper) {
+		rig(helper);
+		// The rig's own shaft at x=4, plus a cogwheel and a clutch on the end of it. Not one of the three
+		// draws a Stress Unit.
+		helper.setBlock(BATTERY_B, AllBlocks.COGWHEEL.getDefaultState()
+			.setValue(BlockStateProperties.AXIS, Direction.Axis.X));
+		helper.setBlock(new BlockPos(6, SHAFT_Y, 5), AllBlocks.CLUTCH.getDefaultState()
+			.setValue(BlockStateProperties.AXIS, Direction.Axis.X));
+		hangWeight(helper, 3, HIGH_TOP);
+		activate(helper, BATTERY_A);
+
+		float[] start = new float[] {Float.NaN};
+		List<String> moved = new ArrayList<>();
+		for (int tick = SETTLE_TICKS; tick < 160; tick += 4) {
+			int at = tick;
+			helper.runAfterDelay(at, () -> {
+				GravityBatteryBlockEntity battery = battery(helper, BATTERY_A);
+				if (Float.isNaN(start[0]))
+					start[0] = battery.offset;
+				if (battery.offset > start[0] + 0.001F)
+					moved.add("t=" + at + " offset=" + battery.offset + " mode=" + battery.getMode());
+			});
+		}
+
+		helper.runAfterDelay(170, () -> {
+			GravityBatteryBlockEntity battery = battery(helper, BATTERY_A);
+			helper.assertTrue(battery.running, "the battery should still be holding its weight");
+			helper.assertTrue(battery.getWeightBlocks() == WEIGHT_BLOCKS,
+				"the rig should have given it a four block weight, it has " + battery.getWeightBlocks());
+			// The offset is the substance: a battery that spent charge into a shaft, a cogwheel and a
+			// clutch has moved, whatever it reports about itself.
+			helper.assertTrue(moved.isEmpty(),
+				"the battery spent its charge into a network that draws nothing: " + moved);
+			helper.assertTrue(battery.getMode() == BatteryMode.IDLE,
+				"expected it to hold station, it is " + battery.getMode());
+			helper.assertTrue(battery.getIdleReason() == IdleReason.NOTHING_TO_DRIVE,
+				"a battery holding because nothing wants power should say so rather than report the "
+					+ "shaft as unpowered; it says " + battery.getIdleReason());
+			helper.succeed();
+		});
+	}
+
 	// --- the wrench -------------------------------------------------------------------------------
 
 	/**
@@ -960,10 +1035,14 @@ public class GBGameTests {
 	@GameTest(template = "test_rig", timeoutTicks = 400)
 	public static void aWrenchedBatteryKeepsDrivingTheShaft(GameTestHelper helper) {
 		rig(helper);
-		// A shaft on the other axis too, so rotating the battery does not simply disconnect it -- that
-		// would idle it for a legitimate reason and prove nothing about re-arming the source.
+		load(helper);
+		// A shaft on the other axis too, with its own load on the end, so rotating the battery neither
+		// disconnects it nor leaves it facing a network that wants nothing -- either would idle it for a
+		// legitimate reason and prove nothing about re-arming the source.
 		helper.setBlock(new BlockPos(3, SHAFT_Y, 6), AllBlocks.SHAFT.getDefaultState()
 			.setValue(BlockStateProperties.AXIS, Direction.Axis.Z));
+		helper.setBlock(new BlockPos(3, SHAFT_Y, 7), AllBlocks.ENCASED_FAN.getDefaultState()
+			.setValue(BlockStateProperties.FACING, Direction.SOUTH));
 		hangWeight(helper, 3, HIGH_TOP);
 		activate(helper, BATTERY_A);
 
@@ -1223,6 +1302,7 @@ public class GBGameTests {
 	@GameTest(template = "test_rig", timeoutTicks = 200)
 	public static void anIdleReasonChangeReachesADisplayLinkToo(GameTestHelper helper) {
 		rig(helper);
+		load(helper);
 		// On the floor with no motor: idle, spent, and something on the shaft worth driving.
 		hangWeight(helper, 3, RESTING_TOP);
 		activate(helper, BATTERY_A);
@@ -1319,6 +1399,7 @@ public class GBGameTests {
 	@GameTest(template = "test_rig", timeoutTicks = 400)
 	public static void bothDirectionsHaveAStressFigureToReport(GameTestHelper helper) {
 		rig(helper);
+		load(helper);
 		hangWeight(helper, 3, HIGH_TOP);
 		activate(helper, BATTERY_A);
 		drive(helper);
@@ -1655,6 +1736,25 @@ public class GBGameTests {
 		helper.setBlock(pos, GBBlocks.GRAVITY_BATTERY.get()
 			.defaultBlockState()
 			.setValue(HorizontalAxisKineticBlock.HORIZONTAL_AXIS, Direction.Axis.X));
+	}
+
+	/**
+	 * Puts something on the east end of the shaft that actually wants turning — an Encased Fan, whose
+	 * stress impact is 2.
+	 *
+	 * <p>Needed by every test that expects a battery to let its weight down, because since
+	 * {@code aChargedBatteryOnABareShaftStaysPut} a battery declines to spend its charge into a network
+	 * where nothing is drawing. The rig used to get its discharges for free from a bare shaft, which
+	 * was the bug that test locks.
+	 *
+	 * <p>East rather than in the motor's slot, so it survives {@code drive()} and the removal of the
+	 * motor afterwards — which is exactly what {@code losingTheSourceLetsTheWeightDown} does.
+	 */
+	private static void load(GameTestHelper helper) {
+		helper.setBlock(BATTERY_B, AllBlocks.SHAFT.getDefaultState()
+			.setValue(BlockStateProperties.AXIS, Direction.Axis.X));
+		helper.setBlock(new BlockPos(6, SHAFT_Y, 5), AllBlocks.ENCASED_FAN.getDefaultState()
+			.setValue(BlockStateProperties.FACING, Direction.EAST));
 	}
 
 	/** Puts the creative motor on the west end of the shaft, driving east into battery A. */
